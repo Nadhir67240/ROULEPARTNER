@@ -5,7 +5,7 @@ import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
-  FileText, Settings, Building2, Shield, Send, Euro,
+  FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil, CalendarPlus, CalendarCheck,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -3080,11 +3080,13 @@ export default function App() {
                   </div>
                 )}
                 {r.patientTel && (
-                  <div style={styles.modalRow}>
-                    <a href={`tel:${r.patientTel.replace(/\s/g, "")}`} style={styles.contactBtn}>
-                      <Phone size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Appeler le patient — {r.patientTel}
-                    </a>
-                  </div>
+                  <a href={`tel:${r.patientTel.replace(/\s/g, "")}`} style={styles.callBtn}>
+                    <span style={styles.callBtnIcon}><Phone size={16} color="#fff" /></span>
+                    <span style={styles.callBtnText}>
+                      <span style={styles.callBtnLabel}>Appeler le patient</span>
+                      <span style={styles.callBtnSub}>{r.patientTel}</span>
+                    </span>
+                  </a>
                 )}
                 {r.tpmr && (
                   <div style={styles.modalRow}>
@@ -3114,21 +3116,25 @@ export default function App() {
                   <span style={{ color: "#6E757E", fontSize: 13 }}>Posté par {r.postedBy} · publiée le {formatPostedAt(r.createdAt)}</span>
                 </div>
                 {!mine && profiles[r.postedBy]?.phone && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                    <a href={`tel:${profiles[r.postedBy].phone.replace(/\s/g, "")}`} style={styles.contactBtn}>
-                      <Phone size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Appeler {r.postedBy}
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <a href={`tel:${profiles[r.postedBy].phone.replace(/\s/g, "")}`} style={{ ...styles.callBtn, flex: 1 }}>
+                      <span style={styles.callBtnIcon}><Phone size={16} color="#fff" /></span>
+                      <span style={styles.callBtnText}>
+                        <span style={styles.callBtnLabel}>Appeler {r.postedBy}</span>
+                        <span style={styles.callBtnSub}>a posté cette course</span>
+                      </span>
                     </a>
-                    <a href={`sms:${profiles[r.postedBy].phone.replace(/\s/g, "")}`} style={styles.contactBtn}>
-                      <MessageCircle size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> SMS
+                    <a href={`sms:${profiles[r.postedBy].phone.replace(/\s/g, "")}`} style={styles.smsIconBtn} aria-label="Envoyer un SMS" title="SMS">
+                      <MessageCircle size={18} />
                     </a>
                   </div>
                 )}
                 {(mine || takenByMe || pendingByMe) && (
                   <button
                     onClick={() => setChatRideId(r.id)}
-                    style={{ ...styles.contactBtn, width: "100%", marginTop: 8, background: "#FFB43A", color: "#1A1206", border: "none", fontWeight: 700 }}
+                    style={{ ...styles.btnPrimaryAction, marginTop: 4 }}
                   >
-                    <MessageCircle size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Discuter dans l'appli
+                    <MessageCircle size={16} /> Discuter dans l'appli
                   </button>
                 )}
               </div>
@@ -3193,68 +3199,76 @@ export default function App() {
                 </div>
               )}
 
-              <div style={styles.modalActions}>
-                <button onClick={() => togglePlanning(r.id)} style={plannedIds.has(r.id) ? styles.btnClaim : styles.btnGhost}>
-                  {plannedIds.has(r.id) ? "Dans le planning ✓" : "Ajouter au planning"}
-                </button>
-                <button onClick={() => duplicateRide(r)} style={styles.btnGhost}>
-                  Dupliquer
-                </button>
-                {mine && r.status === "disponible" && (
-                  <button onClick={() => startEdit(r)} style={styles.btnGhost}>
-                    Modifier
-                  </button>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" }}>
                 {r.status === "disponible" && !mine && !isPriorityLocked && (
-                  <button onClick={() => { claim(r.id); setSelectedRide(null); }} style={styles.btnClaim}>
-                    <Check size={14} style={{ marginRight: 4 }} />
-                    Je la prends
+                  <button onClick={() => { claim(r.id); setSelectedRide(null); }} style={styles.btnPrimaryAction}>
+                    <Check size={16} /> Je la prends
                   </button>
                 )}
                 {r.status === "en_attente" && mine && (
-                  <>
-                    <button onClick={() => { confirmClaim(r); setSelectedRide(null); }} style={styles.btnClaim}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { confirmClaim(r); setSelectedRide(null); }} style={{ ...styles.btnPrimaryAction, width: "auto", flex: 1 }}>
                       Confirmer
                     </button>
-                    <button onClick={() => { refuseClaim(r.id); setSelectedRide(null); }} style={styles.btnGhost}>
+                    <button onClick={() => { refuseClaim(r.id); setSelectedRide(null); }} style={styles.btnSecondaryAction}>
                       Refuser
                     </button>
-                  </>
+                  </div>
                 )}
                 {r.status === "en_attente" && pendingByMe && (
-                  <button onClick={() => { cancelMyClaim(r.id); setSelectedRide(null); }} style={styles.btnGhost}>
+                  <button onClick={() => { cancelMyClaim(r.id); setSelectedRide(null); }} style={styles.btnSecondaryAction}>
                     Annuler ma demande
                   </button>
                 )}
                 {r.status === "prise" && takenByMe && (
-                  <>
-                    <button onClick={() => { startRide(r.id); setSelectedRide(null); }} style={styles.btnClaim}>
-                      <Car size={14} style={{ marginRight: 4 }} /> Commencer
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { startRide(r.id); setSelectedRide(null); }} style={{ ...styles.btnPrimaryAction, width: "auto", flex: 1 }}>
+                      <Car size={16} /> Commencer
                     </button>
-                    <button onClick={() => { release(r.id); setSelectedRide(null); }} style={styles.btnGhost}>
+                    <button onClick={() => { release(r.id); setSelectedRide(null); }} style={styles.btnSecondaryAction}>
                       Relâcher
                     </button>
-                  </>
+                  </div>
                 )}
                 {r.status === "en_cours" && takenByMe && (
-                  <button onClick={() => { markDone(r.id); setSelectedRide(null); }} style={styles.btnClaim}>
-                    <Check size={14} style={{ marginRight: 4 }} /> Terminer
+                  <button onClick={() => { markDone(r.id); setSelectedRide(null); }} style={styles.btnPrimaryAction}>
+                    <Check size={16} /> Terminer
                   </button>
                 )}
-                {(mine || isAdmin) && (
+
+                <div style={{ display: "flex", gap: 8 }}>
                   <button
-                    onClick={() => {
-                      if (window.confirm("Supprimer définitivement cette course ?")) {
-                        remove(r.id);
-                        setSelectedRide(null);
-                      }
+                    onClick={() => togglePlanning(r.id)}
+                    style={{
+                      ...styles.btnUtilityAction,
+                      ...(plannedIds.has(r.id) ? { color: "#FFB43A", borderColor: "#FFB43A" } : {}),
                     }}
-                    style={styles.btnGhost}
                   >
-                    <Trash2 size={14} style={{ marginRight: 4 }} />
-                    Supprimer
+                    {plannedIds.has(r.id) ? <CalendarCheck size={14} /> : <CalendarPlus size={14} />}
+                    {plannedIds.has(r.id) ? "Planifié" : "Planning"}
                   </button>
-                )}
+                  <button onClick={() => duplicateRide(r)} style={styles.btnUtilityAction}>
+                    <Copy size={14} /> Dupliquer
+                  </button>
+                  {mine && r.status === "disponible" && (
+                    <button onClick={() => startEdit(r)} style={styles.btnUtilityAction}>
+                      <Pencil size={14} /> Modifier
+                    </button>
+                  )}
+                  {(mine || isAdmin) && (
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Supprimer définitivement cette course ?")) {
+                          remove(r.id);
+                          setSelectedRide(null);
+                        }
+                      }}
+                      style={{ ...styles.btnUtilityAction, color: "#E5484D", borderColor: "#E5484D" }}
+                    >
+                      <Trash2 size={14} /> Supprimer
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -3927,7 +3941,7 @@ const styles = {
   tabActive: { background: "#FFB43A", color: "#1A1206", borderColor: "#FFB43A", fontWeight: 600 },
   btnPrimary: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "10px 16px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 14 },
   btnGhost: { background: "transparent", border: "1px solid #3A4048", color: "#F2F4F7", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
-  btnClaim: { background: "#3BD07A", color: "#0e2318", border: "none", padding: "8px 14px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 13 },
+  btnClaim: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "8px 14px", borderRadius: 8, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 13 },
   formCard: { margin: "0 24px 20px", background: "#191C21", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14 },
   formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
@@ -4038,6 +4052,37 @@ const styles = {
     flex: 1, textAlign: "center", background: "#23272E", border: "1px solid #3A4048",
     color: "#F2F4F7", padding: "9px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
     textDecoration: "none",
+  },
+  callBtn: {
+    display: "flex", alignItems: "center", gap: 12, flex: 1,
+    background: "rgba(59,208,122,0.10)", border: "1px solid rgba(59,208,122,0.28)",
+    borderRadius: 12, padding: "10px 14px", textDecoration: "none", minWidth: 0,
+  },
+  callBtnIcon: {
+    width: 36, height: 36, borderRadius: "50%", background: "#3BD07A",
+    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  },
+  callBtnText: { display: "flex", flexDirection: "column", gap: 1, minWidth: 0 },
+  callBtnLabel: { fontSize: 14, fontWeight: 700, color: "#F2F4F7" },
+  callBtnSub: { fontSize: 12, color: "#8A9099", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  smsIconBtn: {
+    width: 46, height: 46, borderRadius: 12, border: "1px solid #3A4048", background: "transparent",
+    display: "flex", alignItems: "center", justifyContent: "center", color: "#B8BEC6", flexShrink: 0,
+  },
+  btnPrimaryAction: {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
+    background: "#FFB43A", color: "#1A1206", border: "none", borderRadius: 12,
+    padding: "14px 16px", fontSize: 15, fontWeight: 800, cursor: "pointer",
+  },
+  btnSecondaryAction: {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flex: 1,
+    background: "transparent", color: "#E4E7EB", border: "1.5px solid #3A4048", borderRadius: 12,
+    padding: "14px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer",
+  },
+  btnUtilityAction: {
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1,
+    background: "#191C21", color: "#B8BEC6", border: "1px solid #23272E", borderRadius: 10,
+    padding: "10px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer",
   },
   notes: { fontSize: 12, color: "#B8BEC6", background: "#22262C", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
   priorityBanner: { display: "flex", alignItems: "center", fontSize: 11, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 },
