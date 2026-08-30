@@ -5,7 +5,7 @@ import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
-  FileText, Flag, Settings, Building2, Shield,
+  FileText, Flag, Settings, Building2, Shield, Send,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -2844,7 +2844,16 @@ export default function App() {
                 </div>
               )}
 
-              <h2 style={styles.modalTitle}>{r.depart} → {r.arrivee}</h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                  <span style={{ fontWeight: 700, fontSize: 17, color: "#F2F4F7" }}>{r.depart}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600, fontSize: 17, color: "#B8BEC6" }}>{r.arrivee}</span>
+                </div>
+              </div>
 
               <div style={{ marginBottom: 14 }}>
                 <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}><Navigation size={12} /> Se guider vers le départ</span>
@@ -3081,7 +3090,7 @@ export default function App() {
           onClick={() => setFilter("dispo")}
           style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "#FFB43A" : "#8A9099", position: "relative" }}
         >
-          <Home size={20} />
+          <Home size={18} />
           {newRidesBadge > 0 && (
             <span style={styles.navBadge}>{newRidesBadge > 9 ? "9+" : newRidesBadge}</span>
           )}
@@ -3091,20 +3100,20 @@ export default function App() {
           onClick={() => setFilter("mine")}
           style={{ ...styles.bottomNavBtn, color: filter === "mine" ? "#FFB43A" : "#8A9099" }}
         >
-          <Car size={20} />
+          <Car size={18} />
           <span style={styles.bottomNavLabel}>Courses</span>
         </button>
         {/* Emplacement réservé au bouton + flottant, pour qu'il ne recouvre aucun onglet. */}
         <div style={styles.bottomNavFabSlot} aria-hidden="true" />
         <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, position: "relative" }}>
-          <MessageCircle size={20} />
+          <MessageCircle size={18} />
           {totalUnreadMessages > 0 && (
             <span style={styles.navBadge}>{totalUnreadMessages > 9 ? "9+" : totalUnreadMessages}</span>
           )}
           <span style={styles.bottomNavLabel}>Messages</span>
         </button>
         <button onClick={() => setShowAccountPanel(true)} style={styles.bottomNavBtn}>
-          <User size={20} />
+          <User size={18} />
           <span style={styles.bottomNavLabel}>Compte</span>
         </button>
       </nav>
@@ -3678,7 +3687,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 4 }}>
+            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
               {chatMessages.length === 0 && (
                 <p style={{ color: "#6E757E", fontSize: 13, textAlign: "center", marginTop: 20 }}>
                   Aucun message pour l'instant.
@@ -3691,12 +3700,14 @@ export default function App() {
                     key={m.id}
                     style={{
                       alignSelf: isMe ? "flex-end" : "flex-start",
-                      maxWidth: "80%",
-                      background: isMe ? "#FFB43A" : "#23272E",
-                      color: isMe ? "#1A1206" : "#F2F4F7",
-                      padding: "8px 12px",
-                      borderRadius: 10,
+                      maxWidth: "76%",
+                      background: isMe ? "#FFB43A" : "#22262C",
+                      color: isMe ? "#1A1206" : "#E4E7EB",
+                      padding: "13px 15px",
+                      borderRadius: isMe ? "16px 16px 5px 16px" : "16px 16px 16px 5px",
                       fontSize: 14,
+                      fontWeight: isMe ? 600 : 500,
+                      lineHeight: 1.5,
                     }}
                   >
                     {!isMe && <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>{m.senderName}</div>}
@@ -3706,19 +3717,24 @@ export default function App() {
               })}
               <div ref={chatEndRef} />
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12, paddingTop: 12, borderTop: "1px solid #3A4048" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid #3A4048" }}>
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSendMessage(); }}
                 placeholder="Écrire un message…"
-                style={{ ...styles.input, flex: 1, minWidth: 0 }}
+                style={{ ...styles.input, flex: 1, minWidth: 0, background: "#22262C", border: "none", borderRadius: 999 }}
               />
               <button
                 onClick={handleSendMessage}
-                style={{ ...styles.btnPrimary, flexShrink: 0, whiteSpace: "nowrap", justifyContent: "center" }}
+                aria-label="Envoyer"
+                style={{
+                  width: 46, height: 46, borderRadius: "50%", background: "#FFB43A", border: "none",
+                  color: "#1A1206", display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0, cursor: "pointer",
+                }}
               >
-                Envoyer
+                <Send size={18} />
               </button>
             </div>
           </div>
@@ -3917,7 +3933,7 @@ const styles = {
     background: "none", border: "none", display: "flex", flexDirection: "column",
     alignItems: "center", gap: 3, cursor: "pointer", padding: "6px 10px", minWidth: 56,
   },
-  bottomNavLabel: { fontSize: 10, fontWeight: 600 },
+  bottomNavLabel: { fontSize: 11, fontWeight: 600 },
   navBadge: {
     position: "absolute", top: 2, right: "28%",
     background: "#E5484D", color: "#fff", fontSize: 10, fontWeight: 800,
