@@ -1706,10 +1706,10 @@ export default function App() {
     ...rides.map((r) => r.takenBy).filter(Boolean),
   ]));
 
-  const myEarnings = rides
+  const myTakenRides = rides
     .filter((r) => r.takenBy === driverName)
-    .filter((r) => !dateFilter || dateKey(r.createdAt) === dateFilter)
-    .reduce((sum, r) => sum + (parseFloat(String(r.tarif).replace(",", ".")) || 0), 0);
+    .filter((r) => !dateFilter || dateKey(r.createdAt) === dateFilter);
+  const myEarnings = myTakenRides.reduce((sum, r) => sum + (parseFloat(String(r.tarif).replace(",", ".")) || 0), 0);
 
   const earningsLabel =
     dateFilter === todayKey(0) ? "aujourd'hui" :
@@ -2168,8 +2168,16 @@ export default function App() {
         </div>
       )}
 
-      <div style={styles.earningsBanner}>
-        Tu as gagné <strong>{myEarnings.toFixed(2)} €</strong> {earningsLabel} ({rides.filter((r) => r.takenBy === driverName && (!dateFilter || dateKey(r.createdAt) === dateFilter)).length} course{rides.filter((r) => r.takenBy === driverName && (!dateFilter || dateKey(r.createdAt) === dateFilter)).length > 1 ? "s" : ""})
+      <div style={{ margin: "0 24px 18px" }}>
+        <div style={styles.gainsCard}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={styles.gainsLabel}>Gains {earningsLabel}</span>
+            <span style={styles.gainsAmount}>{myEarnings.toFixed(2)} €</span>
+          </div>
+          <span style={styles.gainsCount}>
+            {myTakenRides.length} course{myTakenRides.length > 1 ? "s" : ""}<br />reprise{myTakenRides.length > 1 ? "s" : ""}
+          </span>
+        </div>
       </div>
 
       {!myPos && (
@@ -2198,9 +2206,8 @@ export default function App() {
                 onClick={() => setForm({ ...form, type: t.id })}
                 style={{
                   ...styles.typeChip,
-                  borderColor: t.color,
-                  color: form.type === t.id ? "#1A1206" : t.color,
-                  background: form.type === t.id ? t.color : "transparent",
+                  color: form.type === t.id ? "#1A1206" : "#B8BEC6",
+                  background: form.type === t.id ? "#FFB43A" : "#22262C",
                 }}
               >
                 {t.label}
@@ -2393,9 +2400,8 @@ export default function App() {
                     onClick={() => setForm({ ...form, trajet: t.id })}
                     style={{
                       ...styles.typeChip,
-                      borderColor: "#3A4048",
                       color: form.trajet === t.id ? "#1A1206" : "#B8BEC6",
-                      background: form.trajet === t.id ? "#FFB43A" : "transparent",
+                      background: form.trajet === t.id ? "#FFB43A" : "#22262C",
                     }}
                   >
                     {t.label}
@@ -3210,8 +3216,14 @@ export default function App() {
             {!accountSubPanel && (
               <>
                 <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>{user?.email}</p>
-                <div style={styles.earningsBanner}>
-                  Tu as gagné <strong>{myEarnings.toFixed(2)} €</strong> {earningsLabel}
+                <div style={styles.gainsCard}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <span style={styles.gainsLabel}>Gains {earningsLabel}</span>
+                    <span style={styles.gainsAmount}>{myEarnings.toFixed(2)} €</span>
+                  </div>
+                  <span style={styles.gainsCount}>
+                    {myTakenRides.length} course{myTakenRides.length > 1 ? "s" : ""}<br />reprise{myTakenRides.length > 1 ? "s" : ""}
+                  </span>
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
@@ -3795,7 +3807,7 @@ const styles = {
   formCard: { margin: "0 24px 20px", background: "#191C21", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14 },
   formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
-  typeChip: { border: "1.5px solid", background: "transparent", padding: "12px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700, minHeight: 48 },
+  typeChip: { border: "none", padding: "12px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700, minHeight: 48 },
   input: { background: "#191C21", border: "1.5px solid #23272E", color: "#F2F4F7", padding: "14px 14px", borderRadius: 10, fontSize: 16.5, outline: "none", minHeight: 50 },
   checkboxRow: { display: "flex", alignItems: "center", gap: 10, fontSize: 14.5, color: "#B8BEC6" },
   fieldLabel: { display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, color: "#E4E7EB", fontWeight: 700 },
@@ -3899,7 +3911,13 @@ const styles = {
   cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #2A2F36", paddingTop: 10 },
   postedBy: { fontSize: 11, color: "#6E757E" },
   hintBanner: { margin: "0 24px 16px", background: "#23272E", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#8A9099" },
-  earningsBanner: { margin: "0 24px 16px", background: "rgba(59,208,122,0.1)", border: "1px solid rgba(59,208,122,0.3)", padding: "10px 14px", borderRadius: 8, fontSize: 14, color: "#3BD07A" },
+  gainsCard: {
+    padding: 18, borderRadius: 20, background: "#191C21", border: "1px solid #23272E",
+    display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12,
+  },
+  gainsLabel: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", color: "#8A9099", textTransform: "uppercase" },
+  gainsAmount: { fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" },
+  gainsCount: { fontSize: 13, fontWeight: 600, color: "#8A9099", textAlign: "right", lineHeight: 1.3 },
   planningGap: { display: "flex", alignItems: "center", fontSize: 12, padding: "6px 12px", margin: "8px 0", border: "1px dashed #3A4048", borderRadius: 6 },
   errorBanner: { margin: "0 24px 16px", background: "#E5484D", padding: "10px 14px", borderRadius: 8, display: "flex", justifyContent: "space-between", fontSize: 13 },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 100 },
