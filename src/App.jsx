@@ -896,14 +896,13 @@ export default function App() {
   const mapMarkersRef = useRef({});
   const mapMarkerStatusRef = useRef({}); // name -> "busy"/"free" déjà affiché, pour éviter de recréer l'icône inutilement
   const [editingId, setEditingId] = useState(null);
-  // À l'ouverture d'une course existante en modification, le formulaire se remplit avec ses
-  // valeurs déjà enregistrées (adresses, majorations...) — ce remplissage déclenche les mêmes
-  // effets que si le chauffeur les avait modifiées, et recalculerait donc le tarif pour rien
-  // (ou pire, écraserait un tarif corrigé à la main). On saute ce tout premier recalcul, mais
-  // pas les suivants : si le chauffeur change ensuite l'adresse, le trajet ou une majoration,
-  // le tarif doit bien se remettre à jour.
-  const skipNextTarifRecalc = useRef(false);
-  const skipNextMajorationAuto = useRef(false);
+  // Valeurs "tarif-sensibles" de la course telle qu'elle existait avant l'ouverture de la
+  // modification (adresses, trajet, majorations). Le formulaire d'édition se remplit avec ces
+  // mêmes valeurs, ce qui ne doit PAS déclencher de recalcul (sinon on écraserait un tarif déjà
+  // facturé rien qu'en ouvrant la course) — mais dès que le chauffeur modifie l'une d'elles
+  // (typiquement l'adresse de départ ou d'arrivée), la comparaison ci-dessous ne correspond
+  // plus et le recalcul doit reprendre normalement.
+  const editOriginalTarifInputs = useRef(null);
   const [plannedIds, setPlannedIds] = useState(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem("planned-rides") || "[]"));
@@ -1372,10 +1371,8 @@ export default function App() {
   // ensuite (par exemple pour un jour férié, qu'on ne peut pas détecter tout seul).
   useEffect(() => {
     if (form.type !== "taxi") return;
-    if (skipNextMajorationAuto.current) {
-      skipNextMajorationAuto.current = false;
-      return;
-    }
+    const orig = editOriginalTarifInputs.current;
+    if (orig && orig.heure === form.heure) return; // heure inchangée depuis l'ouverture de la modification
     const auto = autoDetectNightWeekend(form.heure);
     setForm((f) => (f.majorationNuitWeekend === auto ? f : { ...f, majorationNuitWeekend: auto }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1388,9 +1385,16 @@ export default function App() {
   const [calculatingTarif, setCalculatingTarif] = useState(false);
   useEffect(() => {
     if (form.type !== "taxi") return;
-    if (skipNextTarifRecalc.current) {
-      skipNextTarifRecalc.current = false;
-      return;
+    const orig = editOriginalTarifInputs.current;
+    if (
+      orig &&
+      orig.departLat === form.departLat && orig.departLng === form.departLng &&
+      orig.arriveeLat === form.arriveeLat && orig.arriveeLng === form.arriveeLng &&
+      orig.trajet === form.trajet && orig.grandeVille === form.grandeVille &&
+      orig.majorationNuitWeekend === form.majorationNuitWeekend &&
+      orig.retourAVide === form.retourAVide && orig.tpmr === form.tpmr
+    ) {
+      return; // rien de tarif-sensible n'a changé depuis l'ouverture de la modification
     }
     const depart = { lat: form.departLat, lng: form.departLng };
     const arrivee = { lat: form.arriveeLat, lng: form.arriveeLng };
@@ -1471,8 +1475,11 @@ export default function App() {
   };
 
   const startEdit = (r) => {
-    skipNextTarifRecalc.current = true;
-    skipNextMajorationAuto.current = true;
+    editOriginalTarifInputs.current = {
+      departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
+      trajet: r.trajet, grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
+      retourAVide: r.retourAVide || false, tpmr: r.tpmr || false, heure: r.heure,
+    };
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
       heure: r.heure, date: r.date || todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: r.urgent, tpmr: r.tpmr || false, notes: r.notes,
@@ -1487,6 +1494,7 @@ export default function App() {
   };
 
   const duplicateRide = (r) => {
+    editOriginalTarifInputs.current = null;
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
       heure: "", date: todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: false, tpmr: r.tpmr || false, notes: r.notes,
@@ -2541,7 +2549,7 @@ export default function App() {
             display: "flex", gap: 10, position: "sticky", bottom: 0,
             background: "#191C21", padding: "12px 0 2px", marginTop: 4,
           }}>
-            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
+            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; }} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
               Annuler
             </button>
             <button type="submit" style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center" }}>
@@ -3156,7 +3164,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button
-                onClick={() => { setEditingId(null); setForm(emptyForm); setShowForm(true); setShowQuickMenu(false); }}
+                onClick={() => { setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; setShowForm(true); setShowQuickMenu(false); }}
                 style={{ ...styles.btnPrimary, justifyContent: "flex-start", fontSize: 15, minHeight: 50, gap: 8 }}
               >
                 <Plus size={16} /> Poster une course
