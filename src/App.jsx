@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
-  Phone, Search, Calendar, List, Inbox, Map, History,
+  Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
   FileText, Flag, Settings, Building2, Shield,
 } from "lucide-react";
 import {
@@ -3150,7 +3150,7 @@ export default function App() {
                 onClick={() => { setFilter("carte"); setShowQuickMenu(false); }}
                 style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                <Map size={16} /> Carte
+                <MapIcon size={16} /> Carte
               </button>
               <button
                 onClick={() => { setFilter("planning"); setShowQuickMenu(false); }}
