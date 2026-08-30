@@ -774,7 +774,6 @@ export default function App() {
   const [licenseChangeStatus, setLicenseChangeStatus] = useState(null); // null | { ok, text }
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [showQuickMenu, setShowQuickMenu] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [newRidesBadge, setNewRidesBadge] = useState(0);
   const filterRef = useRef("dispo");
@@ -1983,12 +1982,10 @@ export default function App() {
   return (
     <div style={styles.page}>
       <style>{`
-        .rp-desktop-tabs { display: flex; }
         .rp-bottom-nav { display: none; }
         .rp-bottom-spacer { height: 0; }
         .rp-fab-floating { display: none !important; }
         @media (max-width: 720px) {
-          .rp-desktop-tabs { display: none; }
           .rp-bottom-nav { display: flex; }
           .rp-bottom-spacer { height: 78px; }
           .rp-fab-floating { display: flex !important; }
@@ -2095,29 +2092,42 @@ export default function App() {
         <div style={styles.hintBanner}>Position refusée — vérifie les réglages du navigateur pour recevoir les courses proches de toi.</div>
       )}
 
-      <div className="rp-desktop-tabs" style={{ ...styles.tabs, gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, padding: "12px 24px 14px", alignItems: "center", overflowX: "auto" }}>
         <button
           onClick={() => setShowFilterMenu(true)}
-          style={{ ...styles.tab, display: "flex", alignItems: "center", gap: 6 }}
+          style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
         >
           <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
         </button>
         <button
           onClick={() => setShowCalendarMenu(true)}
-          style={{ ...styles.tab, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1, padding: "6px 12px" }}
+          style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
         >
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Calendar size={13} /> {!dateFilter ? "Toutes les dates"
-              : dateFilter === "week" ? "Cette semaine"
-              : dateFilter === todayKey(0) ? "Aujourd'hui"
-              : dateFilter === todayKey(1) ? "Demain"
-              : formatDayMonth(dateFilter)}
-          </span>
-          {dateFilter && dateFilter !== "week" && (
-            <span style={{ fontSize: 11, color: "#8A9099", fontWeight: 400 }}>{formatDayMonth(dateFilter)} ▾</span>
-          )}
+          <Calendar size={13} /> {!dateFilter ? "Toutes les dates"
+            : dateFilter === "week" ? "Cette semaine"
+            : dateFilter === todayKey(0) ? "Aujourd'hui"
+            : dateFilter === todayKey(1) ? "Demain"
+            : formatDayMonth(dateFilter)}
         </button>
-        <div style={{ flex: 1 }} />
+        <div style={{ width: 1, alignSelf: "stretch", background: "#23272E", flexShrink: 0 }} />
+        {[
+          { id: "recues", label: "Reçues", icon: Inbox },
+          { id: "carte", label: "Carte", icon: MapIcon },
+          { id: "planning", label: "Planning", icon: Clock },
+          { id: "historique", label: "Historique", icon: History },
+          { id: "toutes", label: "Toutes", icon: List },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setFilter(t.id)}
+            style={{
+              ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+              ...(filter === t.id ? styles.tabActive : {}),
+            }}
+          >
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
       </div>
 
       {showFilterMenu && (
@@ -2224,6 +2234,7 @@ export default function App() {
 
       {showForm && (
         <form onSubmit={handlePost} style={styles.formCard}>
+          <div style={styles.formLabel}>Type de course</div>
           <div style={styles.formRow}>
             {TYPES.map((t) => (
               <button
@@ -2240,13 +2251,14 @@ export default function App() {
               </button>
             ))}
           </div>
+          <div style={styles.sectionDivider} />
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="button" onClick={swapDepartArrivee} style={styles.btnGhost}>
-              ↓↑ Inverser départ / arrivée
+              ↓↑ Inverser
             </button>
           </div>
           <div style={styles.formGrid}>
-            <label style={styles.fieldLabel}>
+            <label style={styles.formLabel}>
               Adresse de départ
               <div style={{ position: "relative" }}>
                 <input
@@ -2298,7 +2310,7 @@ export default function App() {
                 )}
               </div>
             </label>
-            <label style={styles.fieldLabel}>
+            <label style={styles.formLabel}>
               Adresse d'arrivée
               <div style={{ position: "relative" }}>
                 <input
@@ -2366,25 +2378,35 @@ export default function App() {
                 Dans 15 min
               </button>
             </div>
-            <label style={styles.fieldLabel}>
+            <label style={styles.formLabel}>
               Date de la course
               <input style={styles.input} type="date" lang="fr-FR" value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })} required />
             </label>
-            <label style={styles.fieldLabel}>
+            <label style={styles.formLabel}>
               Heure de prise en charge
               <input style={styles.input} type="time" value={form.heure}
                 onChange={(e) => setForm({ ...form, heure: e.target.value })} required />
             </label>
-            <label style={styles.fieldLabel}>
-              Tarif estimé (€) {form.type === "taxi" && (
-                calculatingTarif
-                  ? <span style={{ color: "#FFB43A", fontWeight: 400 }}>— calcul en cours…</span>
-                  : <span style={{ color: "#3BD07A", fontWeight: 400 }}>— calculé automatiquement</span>
-              )}
-              <input style={{ ...styles.input, width: "100%" }} placeholder="Ex: 65" value={form.tarif}
-                onChange={(e) => setForm({ ...form, tarif: e.target.value })} />
-            </label>
+            {form.type === "taxi" ? (
+              <label style={{ ...styles.formLabel, gridColumn: "1 / -1" }}>
+                Tarif conventionné
+                <div style={{ padding: 16, borderRadius: 14, background: "#22262C", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                  <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" }}>
+                    {calculatingTarif ? "…" : form.tarif ? `${form.tarif} €` : "—"}
+                  </span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "#FFB43A" : "#8A9099" }}>
+                    {calculatingTarif ? "calcul en cours…" : "grille CPAM · calculé automatiquement"}
+                  </span>
+                </div>
+              </label>
+            ) : (
+              <label style={styles.formLabel}>
+                Tarif estimé (€)
+                <input style={{ ...styles.input, width: "100%" }} placeholder="Ex: 65" value={form.tarif}
+                  onChange={(e) => setForm({ ...form, tarif: e.target.value })} />
+              </label>
+            )}
             {form.type === "taxi" && (
               <>
                 <label style={styles.checkboxRow}>
@@ -2416,7 +2438,7 @@ export default function App() {
                 )}
               </>
             )}
-            <div style={styles.fieldLabel}>
+            <div style={styles.formLabel}>
               Trajet
               <div style={styles.formRow}>
                 {TRAJET_TYPES.map((t) => (
@@ -2462,34 +2484,35 @@ export default function App() {
               </button>
             </div>
           </div>
+          <div style={styles.sectionDivider} />
 
           <button
             type="button"
             onClick={() => setShowMoreDetails(!showMoreDetails)}
             style={styles.collapsibleHeader}
           >
-            Détails complémentaires (patient, notes, photo — optionnel)
+            Détails complémentaires (optionnel)
             {showMoreDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
           {showMoreDetails && (
             <>
-              <label style={styles.fieldLabel}>
+              <label style={styles.formLabel}>
                 Initiales patient (optionnel)
                 <input style={styles.input} placeholder="Ex: J.D." value={form.patient}
                   onChange={(e) => setForm({ ...form, patient: e.target.value })} />
               </label>
-              <label style={styles.fieldLabel}>
+              <label style={styles.formLabel}>
                 Téléphone patient (optionnel)
                 <input style={styles.input} placeholder="Ex: 06 12 34 56 78" value={form.patientTel}
                   onChange={(e) => setForm({ ...form, patientTel: e.target.value })} />
               </label>
-              <label style={styles.fieldLabel}>
+              <label style={styles.formLabel}>
                 Notes
                 <textarea style={{ ...styles.input, width: "100%", minHeight: 60 }}
                   placeholder="Brancard, fauteuil roulant, code d'accès..." value={form.notes}
                   onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               </label>
-              <label style={styles.fieldLabel}>
+              <label style={styles.formLabel}>
                 Photo du bon de transport (optionnel)
                 <input
                   ref={photoInputRef}
@@ -2516,7 +2539,7 @@ export default function App() {
                   </button>
                 </div>
               )}
-              <label style={styles.fieldLabel}>
+              <label style={styles.formLabel}>
                 Bon de transport en PDF (optionnel — visible seulement une fois la course prise)
                 <input
                   ref={documentInputRef}
@@ -3149,72 +3172,14 @@ export default function App() {
           <span style={styles.bottomNavLabel}>Compte</span>
         </button>
       </nav>
-      <button onClick={() => setShowQuickMenu(true)} className="rp-fab-floating" style={styles.bottomNavFabFloating}>
+      <button
+        onClick={() => { setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; setShowForm(true); }}
+        className="rp-fab-floating"
+        style={styles.bottomNavFabFloating}
+        aria-label="Poster une course"
+      >
         <Plus size={26} color="#1A1206" />
       </button>
-
-      {showQuickMenu && (
-        <div style={styles.modalOverlay} onClick={() => setShowQuickMenu(false)}>
-          <div style={{ ...styles.modalCard, maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Que veux-tu faire ?</h2>
-              <button onClick={() => setShowQuickMenu(false)} style={styles.iconBtn}>
-                <X size={16} />
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button
-                onClick={() => { setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; setShowForm(true); setShowQuickMenu(false); }}
-                style={{ ...styles.btnPrimary, justifyContent: "flex-start", fontSize: 15, minHeight: 50, gap: 8 }}
-              >
-                <Plus size={16} /> Poster une course
-              </button>
-              <button
-                onClick={() => { setFilter("dispo"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <Car size={16} /> Disponibles
-              </button>
-              <button
-                onClick={() => { setFilter("mine"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <List size={16} /> Mes courses
-              </button>
-              <button
-                onClick={() => { setFilter("recues"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <Inbox size={16} /> Courses reçues
-              </button>
-              <button
-                onClick={() => { setFilter("carte"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <MapIcon size={16} /> Carte
-              </button>
-              <button
-                onClick={() => { setFilter("planning"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <Clock size={16} /> Planning du jour
-              </button>
-              <button
-                onClick={() => { setFilter("historique"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <History size={16} /> Historique
-              </button>
-              <button
-                onClick={() => { setFilter("toutes"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
-              >
-                <List size={16} /> Toutes les courses
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showAccountPanel && (
         <div style={styles.modalOverlay} onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); }}>
@@ -3835,6 +3800,11 @@ const styles = {
   input: { background: "#191C21", border: "1.5px solid #23272E", color: "#F2F4F7", padding: "14px 14px", borderRadius: 10, fontSize: 16.5, outline: "none", minHeight: 50 },
   checkboxRow: { display: "flex", alignItems: "center", gap: 10, fontSize: 14.5, color: "#B8BEC6" },
   fieldLabel: { display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, color: "#E4E7EB", fontWeight: 700 },
+  formLabel: {
+    display: "flex", flexDirection: "column", gap: 7,
+    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600,
+    color: "#8A9099", textTransform: "uppercase", letterSpacing: "0.10em",
+  },
   sectionLabel: {
     fontFamily: "'Manrope', sans-serif", fontSize: 11.5, fontWeight: 700,
     color: "#6E757E", textTransform: "uppercase", letterSpacing: 0.6,
