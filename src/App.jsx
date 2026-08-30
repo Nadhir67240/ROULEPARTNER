@@ -3,7 +3,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
-  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home
+  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
+  Phone, Search, Calendar, List, Inbox, Map, History,
+  FileText, Flag, Settings, Building2, Shield,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -1667,13 +1669,6 @@ export default function App() {
   const priorityDriversFor = (ride) => computePriorityDrivers(ride, positions);
 
   const myPos = positions[driverName] || null;
-  const stats = {
-    disponibles: rides.filter((r) => r.status === "disponible").length,
-    acceptees: rides.filter((r) => ["prise", "en_cours", "terminee"].includes(r.status)).length,
-  };
-  const onlineCount = Object.values(positions).filter(
-    (p) => p.updatedAt && Date.now() - p.updatedAt < 15 * 60 * 1000
-  ).length;
 
   // Regroupe tous les messages par course pour construire la liste des
   // conversations (dernier message, interlocuteur, nombre de non-lus).
@@ -1990,7 +1985,7 @@ export default function App() {
             <div style={styles.priorityAlertCard}>
               <div style={styles.priorityAlertTop}>
                 <span className="rp-beacon-pulse" style={styles.priorityAlertPill}>
-                  ⭐ COURSE PRIORITAIRE
+                  COURSE PRIORITAIRE
                 </span>
                 <span className="rp-meter" style={{ fontSize: 26 }}>{secondsLeft}s</span>
               </div>
@@ -2052,7 +2047,7 @@ export default function App() {
       <header style={styles.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={styles.logoBadge}>
-            <Car size={16} color="#1A1206" />
+            <Car size={18} color="#1A1206" />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             <h1 style={styles.title}>RoulePartner</h1>
@@ -2079,14 +2074,14 @@ export default function App() {
           onClick={() => setShowFilterMenu(true)}
           style={{ ...styles.tab, display: "flex", alignItems: "center", gap: 6 }}
         >
-          🔍 Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
+          <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
         </button>
         <button
           onClick={() => setShowCalendarMenu(true)}
           style={{ ...styles.tab, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 1, padding: "6px 12px" }}
         >
-          <span>
-            📅 {!dateFilter ? "Toutes les dates"
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Calendar size={13} /> {!dateFilter ? "Toutes les dates"
               : dateFilter === "week" ? "Cette semaine"
               : dateFilter === todayKey(0) ? "Aujourd'hui"
               : dateFilter === todayKey(1) ? "Demain"
@@ -2431,7 +2426,7 @@ export default function App() {
                   background: form.tpmr ? "#8FB3F5" : "transparent",
                 }}
               >
-                ♿ TPMR
+                TPMR
               </button>
             </div>
           </div>
@@ -2504,7 +2499,7 @@ export default function App() {
               </label>
               {form.document && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8A9099" }}>
-                  📄 {form.documentName || "bon-de-transport.pdf"}
+                  <FileText size={14} /> {form.documentName || "bon-de-transport.pdf"}
                   <button
                     type="button"
                     onClick={() => setForm({ ...form, document: null, documentName: "" })}
@@ -2539,10 +2534,10 @@ export default function App() {
               ? "Aucun chauffeur ne partage sa position pour l'instant."
               : `${mapDrivers.length} chauffeur${mapDrivers.length > 1 ? "s" : ""} visible${mapDrivers.length > 1 ? "s" : ""} (position partagée il y a moins de 15 min)${radiusFilter !== "all" && myPosForMap ? `, dans un rayon de ${radiusFilter} km` : ""}.`}
           </p>
-          <p style={{ color: "#6E757E", fontSize: 12, marginBottom: 12, display: "flex", gap: 14 }}>
-            <span>🟢 Libre</span>
-            <span>🔴 En course</span>
-            <span>🟠 Toi</span>
+          <p style={{ color: "#6E757E", fontSize: 12, marginBottom: 12, display: "flex", gap: 14, alignItems: "center" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3BD07A", display: "inline-block" }} /> Libre</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#E5484D", display: "inline-block" }} /> En course</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#FFB43A", display: "inline-block" }} /> Toi</span>
           </p>
           <div ref={mapContainerRef} style={styles.mapContainer} />
         </main>
@@ -2588,15 +2583,21 @@ export default function App() {
                     </span>
                     <span style={{ fontWeight: 700, color: "#FFB43A" }}>{r.heure}</span>
                   </div>
-                  <div style={styles.route}>
-                    <MapPin size={14} color="#FFB43A" />
-                    <span>{r.depart}</span>
-                    <span style={{ color: "#5b6070" }}>→</span>
-                    <span>{r.arrivee}</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                        <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7" }}>{r.depart}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6" }}>{r.arrivee}</span>
+                      </div>
+                    </div>
+                    {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
                   </div>
                   <div style={styles.metaRow}>
                     <span style={styles.metaItem}>{trajetLabel(r.trajet)}</span>
-                    {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
                   </div>
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
                     <button
@@ -2648,7 +2649,7 @@ export default function App() {
             return (
               <div
                 key={r.id}
-                style={{ ...styles.card, cursor: "pointer", borderLeft: `4px solid ${meta.color}` }}
+                style={{ ...styles.card, cursor: "pointer" }}
                 onClick={() => setSelectedRide(r)}
               >
                 {r.urgent && (
@@ -2658,17 +2659,22 @@ export default function App() {
                   </div>
                 )}
                 <div style={styles.cardHeader}>
-                  <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
-                    {r.type === "ambulance" ? <Stethoscope size={12} style={{ marginRight: 4 }} /> : <Car size={12} style={{ marginRight: 4 }} />}
-                    {meta.label}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
+                      {r.type === "ambulance" ? <Stethoscope size={12} style={{ marginRight: 4 }} /> : <Car size={12} style={{ marginRight: 4 }} />}
+                      {meta.label}
+                    </span>
+                    {r.tpmr && (
+                      <span style={styles.tpmrBadge} title="Transport de personne à mobilité réduite">TPMR</span>
+                    )}
+                  </div>
                   <span style={{
                     ...styles.statusTag,
                     color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
                   }}>
                     {r.status === "disponible" ? "Disponible"
                       : r.status === "en_attente" ? `En attente (${r.pendingBy})`
-                      : r.status === "en_cours" ? `🚗 En cours (${r.takenBy})`
+                      : r.status === "en_cours" ? `En cours (${r.takenBy})`
                       : r.status === "terminee" ? "Terminée"
                       : `Prise par ${r.takenBy}`}
                   </span>
@@ -2676,19 +2682,22 @@ export default function App() {
 
                 {r.photo && <img src={r.photo} alt="Bon de transport" style={styles.cardThumb} />}
 
-                <div style={styles.route}>
-                  {r.tpmr && (
-                    <span style={styles.tpmrBadge} title="Transport de personne à mobilité réduite">TPMR</span>
-                  )}
-                  <MapPin size={14} color="#FFB43A" />
-                  <span>{cardLocality(r.depart)}</span>
-                  <span style={{ color: "#5b6070" }}>→</span>
-                  <span>{cardLocality(r.arrivee)}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                      <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7" }}>{cardLocality(r.depart)}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6" }}>{cardLocality(r.arrivee)}</span>
+                    </div>
+                  </div>
+                  {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
                 </div>
 
                 <div style={styles.metaRow}>
                   <span style={styles.metaItem}><Clock size={13} /> Prise en charge : {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
-                  {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
                   {r.calcDistanceKm != null && (
                     <span style={styles.metaItem}>
                       ({r.calcDistanceKm} km {r.calcIsRoadDistance ? "réels (route)" : "à vol d'oiseau"})
@@ -2701,7 +2710,7 @@ export default function App() {
                       onClick={(e) => e.stopPropagation()}
                       style={{ ...styles.metaItem, color: "#FFB43A", textDecoration: "underline" }}
                     >
-                      📞 {r.patientTel}
+                      <Phone size={12} /> {r.patientTel}
                     </a>
                   )}
                   {r._dist != null && (
@@ -2771,14 +2780,14 @@ export default function App() {
                     {r.status === "prise" && takenByMe && (
                       <>
                         <button onClick={(e) => { e.stopPropagation(); startRide(r.id); }} style={styles.btnClaim}>
-                          🚗 Commencer
+                          <Car size={14} style={{ marginRight: 4 }} /> Commencer
                         </button>
                         <button onClick={(e) => { e.stopPropagation(); release(r.id); }} style={styles.btnGhost}>Relâcher</button>
                       </>
                     )}
                     {r.status === "en_cours" && takenByMe && (
                       <button onClick={(e) => { e.stopPropagation(); markDone(r.id); }} style={styles.btnClaim}>
-                        ✅ Terminer
+                        <Check size={14} style={{ marginRight: 4 }} /> Terminer
                       </button>
                     )}
                     {(mine || isAdmin) && (
@@ -2838,7 +2847,7 @@ export default function App() {
               <h2 style={styles.modalTitle}>{r.depart} → {r.arrivee}</h2>
 
               <div style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600 }}>🧭 Se guider vers le départ</span>
+                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}><Navigation size={12} /> Se guider vers le départ</span>
                 <div style={styles.navRow}>
                   <a href={wazeUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnWaze }}>
                     <span style={{ ...styles.navBtnDot, background: "#05C8F7" }}>W</span> Waze
@@ -2849,7 +2858,7 @@ export default function App() {
                 </div>
               </div>
               <div style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600 }}>🏁 Se guider vers l'arrivée</span>
+                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}><Flag size={12} /> Se guider vers l'arrivée</span>
                 <div style={styles.navRow}>
                   <a href={wazeUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnWaze }}>
                     <span style={{ ...styles.navBtnDot, background: "#05C8F7" }}>W</span> Waze
@@ -2886,7 +2895,7 @@ export default function App() {
                 {r.patientTel && (
                   <div style={styles.modalRow}>
                     <a href={`tel:${r.patientTel.replace(/\s/g, "")}`} style={styles.contactBtn}>
-                      📞 Appeler le patient — {r.patientTel}
+                      <Phone size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Appeler le patient — {r.patientTel}
                     </a>
                   </div>
                 )}
@@ -2909,7 +2918,7 @@ export default function App() {
                   }}>
                     {r.status === "disponible" ? "Disponible"
                       : r.status === "en_attente" ? `En attente de confirmation (${r.pendingBy})`
-                      : r.status === "en_cours" ? `🚗 En cours (${r.takenBy})`
+                      : r.status === "en_cours" ? `En cours (${r.takenBy})`
                       : r.status === "terminee" ? "Terminée"
                       : `Prise par ${r.takenBy}`}
                   </span>
@@ -2920,10 +2929,10 @@ export default function App() {
                 {!mine && profiles[r.postedBy]?.phone && (
                   <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                     <a href={`tel:${profiles[r.postedBy].phone.replace(/\s/g, "")}`} style={styles.contactBtn}>
-                      📞 Appeler {r.postedBy}
+                      <Phone size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Appeler {r.postedBy}
                     </a>
                     <a href={`sms:${profiles[r.postedBy].phone.replace(/\s/g, "")}`} style={styles.contactBtn}>
-                      💬 SMS
+                      <MessageCircle size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> SMS
                     </a>
                   </div>
                 )}
@@ -2932,7 +2941,7 @@ export default function App() {
                     onClick={() => setChatRideId(r.id)}
                     style={{ ...styles.contactBtn, width: "100%", marginTop: 8, background: "#FFB43A", color: "#1A1206", border: "none", fontWeight: 700 }}
                   >
-                    💬 Discuter dans l'appli
+                    <MessageCircle size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Discuter dans l'appli
                   </button>
                 )}
               </div>
@@ -2958,12 +2967,12 @@ export default function App() {
                     textAlign: "center", border: "none", cursor: "pointer",
                   }}
                 >
-                  📄 Ouvrir le bon de transport (PDF)
+                  <FileText size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Ouvrir le bon de transport (PDF)
                 </button>
               )}
               {r.document && !mine && !takenByMe && !pendingByMe && (
-                <p style={{ color: "#6E757E", fontSize: 12, marginTop: 10 }}>
-                  📄 Un bon de transport est joint — accessible une fois la course prise.
+                <p style={{ color: "#6E757E", fontSize: 12, marginTop: 10, display: "flex", alignItems: "center", gap: 5 }}>
+                  <FileText size={12} /> Un bon de transport est joint — accessible une fois la course prise.
                 </p>
               )}
 
@@ -3033,7 +3042,7 @@ export default function App() {
                 {r.status === "prise" && takenByMe && (
                   <>
                     <button onClick={() => { startRide(r.id); setSelectedRide(null); }} style={styles.btnClaim}>
-                      🚗 Commencer
+                      <Car size={14} style={{ marginRight: 4 }} /> Commencer
                     </button>
                     <button onClick={() => { release(r.id); setSelectedRide(null); }} style={styles.btnGhost}>
                       Relâcher
@@ -3042,7 +3051,7 @@ export default function App() {
                 )}
                 {r.status === "en_cours" && takenByMe && (
                   <button onClick={() => { markDone(r.id); setSelectedRide(null); }} style={styles.btnClaim}>
-                    ✅ Terminer
+                    <Check size={14} style={{ marginRight: 4 }} /> Terminer
                   </button>
                 )}
                 {(mine || isAdmin) && (
@@ -3115,51 +3124,51 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button
                 onClick={() => { setEditingId(null); setForm(emptyForm); setShowForm(true); setShowQuickMenu(false); }}
-                style={{ ...styles.btnPrimary, justifyContent: "flex-start", fontSize: 15, minHeight: 50 }}
+                style={{ ...styles.btnPrimary, justifyContent: "flex-start", fontSize: 15, minHeight: 50, gap: 8 }}
               >
-                ➕ Poster une course
+                <Plus size={16} /> Poster une course
               </button>
               <button
                 onClick={() => { setFilter("dispo"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                🚕 Disponibles
+                <Car size={16} /> Disponibles
               </button>
               <button
                 onClick={() => { setFilter("mine"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                📋 Mes courses
+                <List size={16} /> Mes courses
               </button>
               <button
                 onClick={() => { setFilter("recues"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                🤝 Courses reçues
+                <Inbox size={16} /> Courses reçues
               </button>
               <button
                 onClick={() => { setFilter("carte"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                🗺️ Carte
+                <Map size={16} /> Carte
               </button>
               <button
                 onClick={() => { setFilter("planning"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                🕐 Planning du jour
+                <Clock size={16} /> Planning du jour
               </button>
               <button
                 onClick={() => { setFilter("historique"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                📚 Historique
+                <History size={16} /> Historique
               </button>
               <button
                 onClick={() => { setFilter("toutes"); setShowQuickMenu(false); }}
-                style={{ ...styles.btnGhost, textAlign: "left", minHeight: 48, fontSize: 15 }}
+                style={{ ...styles.btnGhost, display: "flex", alignItems: "center", gap: 8, textAlign: "left", minHeight: 48, fontSize: 15 }}
               >
-                🗂️ Toutes les courses
+                <List size={16} /> Toutes les courses
               </button>
             </div>
           </div>
@@ -3198,15 +3207,15 @@ export default function App() {
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
                   <button onClick={() => setAccountSubPanel("profile")} style={styles.categoryBtn}>
-                    <span style={styles.categoryBtnLeft}>👤 Modifier mon profil</span>
+                    <span style={styles.categoryBtnLeft}><User size={16} /> Modifier mon profil</span>
                     <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("settings")} style={styles.categoryBtn}>
-                    <span style={styles.categoryBtnLeft}>⚙️ Réglages (service, notifications)</span>
+                    <span style={styles.categoryBtnLeft}><Settings size={16} /> Réglages (service, notifications)</span>
                     <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("company")} style={styles.categoryBtn}>
-                    <span style={styles.categoryBtnLeft}>🏢 Ma société</span>
+                    <span style={styles.categoryBtnLeft}><Building2 size={16} /> Ma société</span>
                     <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   {isAdmin && (
@@ -3214,7 +3223,7 @@ export default function App() {
                       onClick={() => { setShowAdminPanel(true); setShowAccountPanel(false); }}
                       style={{ ...styles.categoryBtn, borderColor: "#FFB43A", color: "#FFB43A" }}
                     >
-                      <span style={styles.categoryBtnLeft}>🛡️ Administration</span>
+                      <span style={styles.categoryBtnLeft}><Shield size={16} /> Administration</span>
                       <span>›</span>
                     </button>
                   )}
@@ -3446,7 +3455,7 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>🛡️ Administration</h2>
+              <h2 style={{ ...styles.modalTitle, display: "flex", alignItems: "center", gap: 8 }}><Shield size={18} /> Administration</h2>
               <button onClick={() => setShowAdminPanel(false)} style={styles.iconBtn}>
                 <X size={16} />
               </button>
@@ -3473,8 +3482,9 @@ export default function App() {
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {name} {name === driverName && "(toi)"}{" "}
-                        <span style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#3BD07A" : "#6E757E" }}>
-                          {isOnline ? "🟢 en ligne" : "⚪ hors ligne"}
+                        <span style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#3BD07A" : "#6E757E", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: isOnline ? "#3BD07A" : "#6E757E", display: "inline-block" }} />
+                          {isOnline ? "en ligne" : "hors ligne"}
                         </span>
                       </div>
                       <div style={{ fontSize: 12, color: "#6E757E" }}>
@@ -3612,7 +3622,7 @@ export default function App() {
         <div style={styles.modalOverlay} onClick={() => setShowMessagesPanel(false)}>
           <div style={{ ...styles.modalCard, maxWidth: 420, maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>💬 Messages</h2>
+              <h2 style={{ ...styles.modalTitle, display: "flex", alignItems: "center", gap: 8 }}><MessageCircle size={18} /> Messages</h2>
               <button onClick={() => setShowMessagesPanel(false)} style={styles.iconBtn}>
                 <X size={16} />
               </button>
@@ -3733,22 +3743,18 @@ const styles = {
     position: "relative", width: 64, height: 64, borderRadius: 16,
     background: "linear-gradient(135deg, #FFB43A, #d98d1a)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    boxShadow: "0 4px 16px rgba(245,166,35,0.4)", margin: "0 auto 16px",
+    boxShadow: "0 4px 16px rgba(255,180,58,0.4)", margin: "0 auto 16px",
   },
   logoBeaconLarge: {
     position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%",
-    background: "#3BD07A", border: "3px solid #1A1206", boxShadow: "0 0 10px 2px rgba(61,220,132,0.7)",
+    background: "#3BD07A", border: "3px solid #1A1206", boxShadow: "0 0 10px 2px rgba(59,208,122,0.7)",
   },
-  beaconSmall: { width: 10, height: 10, borderRadius: "50%", background: "#FFB43A", boxShadow: "0 0 8px 2px rgba(245,166,35,0.6)" },
+  beaconSmall: { width: 10, height: 10, borderRadius: "50%", background: "#FFB43A", boxShadow: "0 0 8px 2px rgba(255,180,58,0.6)" },
   logoBadge: {
-    position: "relative", width: 32, height: 32, borderRadius: 9,
-    background: "linear-gradient(135deg, #FFB43A, #d98d1a)",
+    position: "relative", width: 38, height: 38, borderRadius: 12,
+    background: "#FFB43A",
     display: "flex", alignItems: "center", justifyContent: "center",
-    boxShadow: "0 2px 8px rgba(245,166,35,0.35)", flexShrink: 0,
-  },
-  logoBeacon: {
-    position: "absolute", top: -3, right: -3, width: 9, height: 9, borderRadius: "50%",
-    background: "#3BD07A", border: "2px solid #1A1206", boxShadow: "0 0 6px 1px rgba(61,220,132,0.7)",
+    flexShrink: 0,
   },
   gateTitle: { fontFamily: "'Manrope', sans-serif", fontSize: 30, letterSpacing: 0.5, fontWeight: 700, margin: 0 },
   gateSub: { color: "#8A9099", fontSize: 14, marginTop: 10, lineHeight: 1.5 },
@@ -3854,12 +3860,11 @@ const styles = {
   },
   emptyTitle: { color: "#F2F4F7", fontSize: 16, fontWeight: 600, margin: "0 0 8px" },
   emptySub: { color: "#6E757E", fontSize: 13, lineHeight: 1.5, margin: 0 },
-  card: { background: "#191C21", borderRadius: 12, padding: "16px 16px 16px 18px", position: "relative", border: "1px solid #23272E" },
+  card: { background: "#191C21", borderRadius: 18, padding: "15px 16px", position: "relative", border: "1px solid #23272E" },
   urgentBadge: { position: "absolute", top: -8, right: 12, background: "#E5484D", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center" },
   cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   typeTag: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: 6, display: "flex", alignItems: "center", letterSpacing: "0.10em", textTransform: "uppercase" },
   statusTag: { fontSize: 12, fontWeight: 600 },
-  route: { display: "flex", alignItems: "center", gap: 6, fontSize: 14, marginBottom: 10, flexWrap: "wrap" },
   metaRow: { display: "flex", gap: 14, fontSize: 12, color: "#8A9099", marginBottom: 8, flexWrap: "wrap" },
   metaItem: { display: "flex", alignItems: "center", gap: 4 },
   tarifTag: {
@@ -3873,12 +3878,12 @@ const styles = {
     textDecoration: "none",
   },
   notes: { fontSize: 12, color: "#B8BEC6", background: "#22262C", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
-  priorityBanner: { display: "flex", alignItems: "center", fontSize: 11, color: "#FFB43A", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.3)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 },
-  pendingBanner: { fontSize: 12, color: "#FFB43A", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.3)", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
+  priorityBanner: { display: "flex", alignItems: "center", fontSize: 11, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 },
+  pendingBanner: { fontSize: 12, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
   cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #2A2F36", paddingTop: 10 },
   postedBy: { fontSize: 11, color: "#6E757E" },
   hintBanner: { margin: "0 24px 16px", background: "#23272E", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#8A9099" },
-  earningsBanner: { margin: "0 24px 16px", background: "rgba(61,220,132,0.1)", border: "1px solid rgba(61,220,132,0.3)", padding: "10px 14px", borderRadius: 8, fontSize: 14, color: "#3BD07A" },
+  earningsBanner: { margin: "0 24px 16px", background: "rgba(59,208,122,0.1)", border: "1px solid rgba(59,208,122,0.3)", padding: "10px 14px", borderRadius: 8, fontSize: 14, color: "#3BD07A" },
   planningGap: { display: "flex", alignItems: "center", fontSize: 12, padding: "6px 12px", margin: "8px 0", border: "1px dashed #3A4048", borderRadius: 6 },
   errorBanner: { margin: "0 24px 16px", background: "#E5484D", padding: "10px 14px", borderRadius: 8, display: "flex", justifyContent: "space-between", fontSize: 13 },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 100 },
@@ -3904,7 +3909,7 @@ const styles = {
   modalActions: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" },
   bottomNav: {
     position: "fixed", bottom: 0, left: 0, right: 0, height: 64,
-    background: "#1A1C24", borderTop: "1px solid #23272E",
+    background: "#131519", borderTop: "1px solid #23272E",
     alignItems: "center", justifyContent: "space-around",
     zIndex: 90, paddingBottom: "env(safe-area-inset-bottom, 0px)",
   },
@@ -3918,19 +3923,14 @@ const styles = {
     background: "#E5484D", color: "#fff", fontSize: 10, fontWeight: 800,
     minWidth: 16, height: 16, borderRadius: 8, display: "flex",
     alignItems: "center", justifyContent: "center", padding: "0 3px",
-    border: "1.5px solid #1A1C24",
-  },
-  bottomNavFab: {
-    background: "#FFB43A", border: "none", borderRadius: "50%",
-    width: 52, height: 52, display: "flex", alignItems: "center", justifyContent: "center",
-    cursor: "pointer", marginTop: -20, boxShadow: "0 4px 14px rgba(245,166,35,0.5)",
+    border: "1.5px solid #131519",
   },
   bottomNavFabSlot: { width: 58, flexShrink: 0 },
   bottomNavFabFloating: {
     position: "fixed", bottom: 34, left: "50%", transform: "translateX(-50%)",
     background: "#FFB43A", border: "3px solid #0F1114", borderRadius: "50%",
     width: 58, height: 58, alignItems: "center", justifyContent: "center",
-    cursor: "pointer", boxShadow: "0 4px 16px rgba(245,166,35,0.55)", zIndex: 91,
+    cursor: "pointer", boxShadow: "0 10px 24px rgba(255,180,58,0.28)", zIndex: 91,
   },
   priorityAlertOverlay: {
     position: "fixed", inset: 0, zIndex: 300,
@@ -3938,9 +3938,9 @@ const styles = {
     display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
   },
   priorityAlertCard: {
-    width: "100%", maxWidth: 420, background: "#1A1C24",
+    width: "100%", maxWidth: 420, background: "#191C21",
     border: "2px solid #FFB43A", borderRadius: 18, padding: 18,
-    boxShadow: "0 0 40px rgba(245,166,35,0.35)",
+    boxShadow: "0 0 40px rgba(255,180,58,0.35)",
     maxHeight: "88vh", overflowY: "auto",
   },
   priorityAlertTop: {
