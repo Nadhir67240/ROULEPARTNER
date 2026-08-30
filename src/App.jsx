@@ -5,7 +5,7 @@ import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
-  FileText, Flag, Settings, Building2, Shield, Send,
+  FileText, Flag, Settings, Building2, Shield, Send, Euro,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -18,10 +18,10 @@ import {
 } from "./firebase";
 
 const TYPES = [
-  { id: "taxi", label: "Taxi conventionné", color: "#FFB43A" },
-  { id: "vsl", label: "VSL", color: "#3BD07A" },
-  { id: "ambulance", label: "Ambulance", color: "#E86E5E" },
-  { id: "taxi_payant", label: "Course payante", color: "#8FB3F5" },
+  { id: "taxi", label: "Taxi conventionné", color: "#FFB43A", icon: Car },
+  { id: "vsl", label: "VSL", color: "#3BD07A", icon: Car },
+  { id: "ambulance", label: "Ambulance", color: "#E86E5E", icon: Stethoscope },
+  { id: "taxi_payant", label: "Course payante", color: "#8FB3F5", icon: Euro },
 ];
 
 const TRAJET_TYPES = [
@@ -775,6 +775,7 @@ export default function App() {
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
   const [newRidesBadge, setNewRidesBadge] = useState(0);
   const filterRef = useRef("dispo");
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
@@ -2235,22 +2236,62 @@ export default function App() {
       {showForm && (
         <form onSubmit={handlePost} style={styles.formCard}>
           <div style={styles.formLabel}>Type de course</div>
-          <div style={styles.formRow}>
-            {TYPES.map((t) => (
-              <button
-                type="button"
-                key={t.id}
-                onClick={() => setForm({ ...form, type: t.id })}
-                style={{
-                  ...styles.typeChip,
-                  color: form.type === t.id ? "#1A1206" : "#B8BEC6",
-                  background: form.type === t.id ? "#FFB43A" : "#22262C",
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowTypeMenu(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 12, width: "100%",
+              background: "#191C21", border: "1px solid #23272E", borderRadius: 12,
+              padding: "12px 14px", cursor: "pointer", textAlign: "left",
+            }}
+          >
+            <span style={{
+              width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+              background: tintBg(typeMeta(form.type).color, 0.15),
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {(() => { const Icon = typeMeta(form.type).icon; return <Icon size={17} color={typeMeta(form.type).color} />; })()}
+            </span>
+            <span style={{ flex: 1, fontSize: 15.5, fontWeight: 700, color: "#F2F4F7" }}>{typeMeta(form.type).label}</span>
+            <ChevronDown size={18} color="#8A9099" />
+          </button>
+          {showTypeMenu && (
+            <div style={styles.modalOverlay} onClick={() => setShowTypeMenu(false)}>
+              <div style={{ ...styles.modalCard, maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                  <h2 style={styles.modalTitle}>Type de course</h2>
+                  <button type="button" onClick={() => setShowTypeMenu(false)} style={styles.iconBtn}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {TYPES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setForm({ ...form, type: t.id }); setShowTypeMenu(false); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 12, width: "100%",
+                        background: form.type === t.id ? tintBg(t.color, 0.12) : "#191C21",
+                        border: `1px solid ${form.type === t.id ? t.color : "#23272E"}`,
+                        borderRadius: 12, padding: "13px 14px", cursor: "pointer", textAlign: "left",
+                      }}
+                    >
+                      <span style={{
+                        width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+                        background: tintBg(t.color, 0.15),
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <t.icon size={17} color={t.color} />
+                      </span>
+                      <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#F2F4F7" }}>{t.label}</span>
+                      {form.type === t.id && <Check size={18} color={t.color} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <div style={styles.sectionDivider} />
           <div style={styles.formGrid}>
             <div style={{ gridColumn: "1 / -1" }}>
@@ -2719,7 +2760,7 @@ export default function App() {
                 <div style={styles.cardHeader}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
-                      {r.type === "ambulance" ? <Stethoscope size={12} style={{ marginRight: 4 }} /> : <Car size={12} style={{ marginRight: 4 }} />}
+                      <meta.icon size={12} style={{ marginRight: 4 }} />
                       {meta.label}
                     </span>
                     {r.tpmr && (
@@ -2887,7 +2928,7 @@ export default function App() {
             <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
               <div style={styles.modalHeader}>
                 <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
-                  {r.type === "ambulance" ? <Stethoscope size={12} style={{ marginRight: 4 }} /> : <Car size={12} style={{ marginRight: 4 }} />}
+                  <meta.icon size={12} style={{ marginRight: 4 }} />
                   {meta.label}
                 </span>
                 <button onClick={() => setSelectedRide(null)} style={styles.iconBtn}>
