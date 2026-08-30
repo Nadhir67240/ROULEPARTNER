@@ -399,6 +399,109 @@ function isMedicalPoi(s) {
   return s.class === "amenity" && MEDICAL_POI_TYPES.has(s.type);
 }
 
+// Résultats sans intérêt comme point de prise en charge/dépose (arrêts de bus, feux,
+// limites administratives de ville/région...) — ils polluent surtout les recherches
+// de lieux nommés, où le vrai lieu (ex: l'hôpital) se retrouve noyé parmi ses arrêts de bus.
+const NOISE_CLASSES = new Set(["boundary", "natural", "landuse", "waterway"]);
+const NOISE_HIGHWAY_TYPES = new Set(["bus_stop", "traffic_signals", "crossing", "give_way", "stop", "milestone", "street_lamp", "speed_camera"]);
+const NOISE_RAILWAY_TYPES = new Set(["platform", "stop", "signal", "switch"]);
+function isNoiseResult(s) {
+  if (NOISE_CLASSES.has(s.class)) return true;
+  if (s.class === "highway" && NOISE_HIGHWAY_TYPES.has(s.type)) return true;
+  if (s.class === "railway" && NOISE_RAILWAY_TYPES.has(s.type)) return true;
+  return false;
+}
+
+// Convertit un résultat de la Base Adresse Nationale (adresse.data.gouv.fr, service public
+// français) vers la même forme que les résultats Nominatim, pour réutiliser telles quelles
+// shortAddress/isNoiseResult/isMedicalPoi/rankAddressResults sur les deux sources combinées.
+// La BAN est bien plus tolérante aux fautes de frappe sur les adresses de rue que Nominatim
+// (base postale officielle avec recherche floue), mais ne connaît pas les noms de lieux
+// (hôpitaux, commerces...) — d'où la combinaison des deux plutôt qu'un remplacement.
+function banToAddressResult(feature) {
+  const p = feature.properties || {};
+  const [lon, lat] = feature.geometry?.coordinates || [null, null];
+  return {
+    place_id: `ban-${p.id || `${lat},${lon}`}`,
+    lat: String(lat),
+    lon: String(lon),
+    display_name: p.label,
+    class: "ban",
+    type: p.type,
+    namedetails: null,
+    address: {
+      house_number: p.housenumber,
+      road: p.street || (p.type === "street" ? p.name : undefined),
+      city: p.city,
+      postcode: p.postcode,
+    },
+  };
+}
+
+async function fetchBanSuggestions(query, here) {
+  const params = new URLSearchParams({ q: query, limit: "6" });
+  if (here) {
+    params.set("lat", String(here.lat));
+    params.set("lon", String(here.lng));
+  }
+  const res = await fetch(`https://api-adresse.data.gouv.fr/search/?${params.toString()}`);
+  const data = await res.json();
+  return (data.features || []).map(banToAddressResult);
+}
+
+// Alterne les deux sources plutôt que de tout concaténer : sinon les meilleurs résultats
+// de la seconde source (souvent le vrai lieu nommé côté Nominatim) se retrouvent noyés
+// derrière les six résultats, même médiocres, de la première.
+function interleaveResults(a, b) {
+  const out = [];
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i]) out.push(a[i]);
+    if (b[i]) out.push(b[i]);
+  }
+  return out;
+}
+
+// Distance au-delà de laquelle on arrête de tenir compte de la proximité pour classer les
+// résultats : une course médicale part souvent vers un hôpital spécialisé à 50-100 km, et ce
+// résultat, pourtant le bon, ne doit pas être relégué derrière un résultat proche mais hors
+// sujet. Sous ce seuil, on se contente de séparer "plausible" de "loin" — sans retrier par
+// distance à l'intérieur du groupe, pour ne pas écraser le score de pertinence déjà calculé
+// par chaque service (score de la BAN, importance/proximité déjà appliquée par Nominatim).
+const NEARBY_RANK_RADIUS_KM = 60;
+
+// Filtre le bruit, sépare résultats plausibles/lointains, fait remonter un lieu nommé identifié
+// avec certitude (ex: la fiche OSM de l'hôpital) devant une simple correspondance partielle de
+// nom de rue (ex: une rue contenant "hôpital" dans son nom), puis déduplique les entrées
+// identiques une fois affichées (ex: l'hôpital et son arrêt de bus homonyme).
+function rankAddressResults(data, here) {
+  const filtered = data.filter((s) => !isNoiseResult(s));
+  // Si le filtrage a tout supprimé (requête très spécifique ne renvoyant que du "bruit"),
+  // mieux vaut afficher ces résultats que rien du tout.
+  const base = filtered.length > 0 ? filtered : data;
+  let ordered = base;
+  if (here) {
+    const withDist = base.map((s, idx) => ({
+      s,
+      idx,
+      d: distanceKm(here, { lat: parseFloat(s.lat), lng: parseFloat(s.lon) }),
+    }));
+    const near = withDist.filter((x) => x.d == null || x.d <= NEARBY_RANK_RADIUS_KM).sort((a, b) => a.idx - b.idx);
+    const far = withDist.filter((x) => x.d != null && x.d > NEARBY_RANK_RADIUS_KM).sort((a, b) => a.idx - b.idx);
+    ordered = [...near, ...far].map((x) => x.s);
+  }
+  const namedPois = ordered.filter((s) => s.namedetails?.name);
+  const others = ordered.filter((s) => !s.namedetails?.name);
+  ordered = [...namedPois, ...others];
+  const seen = new Set();
+  return ordered.filter((s) => {
+    const label = shortAddress(s);
+    if (seen.has(label)) return false;
+    seen.add(label);
+    return true;
+  });
+}
+
 // Distance à vol d'oiseau entre la position du chauffeur et un résultat de recherche brut,
 // affichée dans la liste de suggestions pour départager rapidement plusieurs résultats homonymes.
 function suggestionDistanceLabel(here, s) {
@@ -828,22 +931,21 @@ export default function App() {
     ref.current = setTimeout(async () => {
       setSearchingAddress(true);
       try {
-        // namedetails=1 fait remonter le nom des lieux (hôpitaux, cliniques, pharmacies...)
-        // en plus de l'adresse brute ; dedupe=1 évite les doublons du même lieu.
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&namedetails=1&dedupe=1&countrycodes=fr&limit=8&viewbox=${viewbox}&bounded=0&q=${encodeURIComponent(query)}`
-        );
-        const data = await res.json();
-        // Tri par proximité réelle avec ta position, quand elle est connue —
-        // les adresses les plus utiles pour toi remontent en premier.
-        const sorted = here
-          ? [...data].sort((a, b) => {
-              const da = distanceKm(here, { lat: parseFloat(a.lat), lng: parseFloat(a.lon) });
-              const db = distanceKm(here, { lat: parseFloat(b.lat), lng: parseFloat(b.lon) });
-              return (da ?? Infinity) - (db ?? Infinity);
-            })
-          : data;
-        setSuggestions(sorted);
+        // Deux sources combinées : la Base Adresse Nationale (service public français)
+        // tolère bien mieux les fautes de frappe sur les adresses de rue, tandis que
+        // Nominatim/OSM connaît les lieux nommés (hôpitaux, cliniques, pharmacies...)
+        // que la BAN ignore. On les interroge en parallèle et on fusionne le résultat.
+        // namedetails=1 fait remonter le nom des lieux en plus de l'adresse brute ;
+        // dedupe=1 évite les doublons du même lieu côté Nominatim.
+        const [banResults, nominatimResults] = await Promise.all([
+          fetchBanSuggestions(query, here).catch(() => []),
+          fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&namedetails=1&dedupe=1&countrycodes=fr&limit=8&viewbox=${viewbox}&bounded=0&q=${encodeURIComponent(query)}`
+          )
+            .then((res) => res.json())
+            .catch(() => []),
+        ]);
+        setSuggestions(rankAddressResults(interleaveResults(banResults, nominatimResults), here));
       } catch (e) {
         setSuggestions([]);
       } finally {
