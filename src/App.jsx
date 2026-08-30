@@ -3217,12 +3217,24 @@ export default function App() {
         </button>
       </nav>
       <button
-        onClick={() => { setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; setShowForm(true); }}
+        onClick={() => {
+          if (showForm) {
+            setShowForm(false);
+            setEditingId(null);
+            setForm(emptyForm);
+            editOriginalTarifInputs.current = null;
+          } else {
+            setEditingId(null);
+            setForm(emptyForm);
+            editOriginalTarifInputs.current = null;
+            setShowForm(true);
+          }
+        }}
         className="rp-fab-floating"
         style={styles.bottomNavFabFloating}
-        aria-label="Poster une course"
+        aria-label={showForm ? "Fermer le formulaire" : "Poster une course"}
       >
-        <Plus size={26} color="#1A1206" />
+        {showForm ? <X size={26} color="#1A1206" /> : <Plus size={26} color="#1A1206" />}
       </button>
 
       {showAccountPanel && (
