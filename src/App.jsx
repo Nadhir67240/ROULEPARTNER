@@ -3236,7 +3236,7 @@ export default function App() {
                   </button>
                 )}
 
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   <button
                     onClick={() => togglePlanning(r.id)}
                     style={{
@@ -4080,7 +4080,8 @@ const styles = {
     padding: "14px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer",
   },
   btnUtilityAction: {
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1,
+    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+    flex: "1 1 84px", minWidth: 0, whiteSpace: "nowrap",
     background: "#191C21", color: "#B8BEC6", border: "1px solid #23272E", borderRadius: 10,
     padding: "10px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer",
   },
