@@ -1784,7 +1784,7 @@ export default function App() {
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
             <Car size={30} color="#1A1206" />
-            <span className="rp-logo-beacon" style={styles.logoBeaconLarge} />
+            <span style={styles.logoBeaconLarge} />
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
         </div>
@@ -1798,7 +1798,7 @@ export default function App() {
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
             <Car size={30} color="#1A1206" />
-            <span className="rp-logo-beacon" style={styles.logoBeaconLarge} />
+            <span style={styles.logoBeaconLarge} />
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
           {bannedNotice ? (
@@ -1887,7 +1887,7 @@ export default function App() {
               </button>
             )}
             {resetSent && (
-              <span style={{ color: "#4CAF77", fontSize: 13 }}>
+              <span style={{ color: "#3BD07A", fontSize: 13 }}>
                 Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé.
               </span>
             )}
@@ -1907,7 +1907,7 @@ export default function App() {
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
             <Car size={30} color="#1A1206" />
-            <span className="rp-logo-beacon" style={styles.logoBeaconLarge} />
+            <span style={styles.logoBeaconLarge} />
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
           <p style={styles.gateSub}>
@@ -3766,18 +3766,16 @@ const styles = {
     position: "relative",
   },
   gateCard: { maxWidth: 380, margin: "80px auto", background: "#191C21", borderRadius: 14, padding: "32px 28px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid #23272E" },
-  beacon: { width: 14, height: 14, borderRadius: "50%", background: "#FFB43A", margin: "0 auto 16px" },
   logoBadgeLarge: {
-    position: "relative", width: 64, height: 64, borderRadius: 16,
-    background: "linear-gradient(135deg, #FFB43A, #d98d1a)",
+    position: "relative", width: 64, height: 64, borderRadius: 18,
+    background: "#FFB43A",
     display: "flex", alignItems: "center", justifyContent: "center",
-    boxShadow: "0 4px 16px rgba(255,180,58,0.4)", margin: "0 auto 16px",
+    margin: "0 auto 16px",
   },
   logoBeaconLarge: {
     position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%",
-    background: "#3BD07A", border: "3px solid #1A1206", boxShadow: "0 0 10px 2px rgba(59,208,122,0.7)",
+    background: "#3BD07A", border: "3px solid #0F1114",
   },
-  beaconSmall: { width: 10, height: 10, borderRadius: "50%", background: "#FFB43A", boxShadow: "0 0 8px 2px rgba(255,180,58,0.6)" },
   logoBadge: {
     position: "relative", width: 38, height: 38, borderRadius: 12,
     background: "#FFB43A",
