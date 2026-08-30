@@ -2252,116 +2252,119 @@ export default function App() {
             ))}
           </div>
           <div style={styles.sectionDivider} />
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="button" onClick={swapDepartArrivee} style={styles.btnGhost}>
-              ↓↑ Inverser
-            </button>
-          </div>
           <div style={styles.formGrid}>
-            <label style={styles.formLabel}>
-              Adresse de départ
-              <div style={{ position: "relative" }}>
-                <input
-                  style={styles.input}
-                  placeholder="Ex: 5 rue du Rhin, Bischwiller — ou un nom de lieu"
-                  value={form.depart}
-                  onChange={(e) => {
-                    setForm({ ...form, depart: e.target.value });
-                    setActiveField("depart");
-                    setSuggestionActiveIndex(-1);
-                    searchAddress(e.target.value, setDepartSuggestions);
-                  }}
-                  onFocus={() => { setActiveField("depart"); setSuggestionActiveIndex(-1); }}
-                  onBlur={() => setTimeout(() => setActiveField((f) => (f === "depart" ? null : f)), 120)}
-                  onKeyDown={(e) => handleAddressKeyDown("depart", e)}
-                  required
-                />
-                {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
-                  <div style={styles.suggestionBox}>
-                    <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={styles.formLabel}>Trajet</div>
+              <div style={styles.routeCard}>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px", borderBottom: "1px solid #23272E" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                    <input
+                      style={styles.routeRowInput}
+                      placeholder="Adresse de départ"
+                      value={form.depart}
+                      onChange={(e) => {
+                        setForm({ ...form, depart: e.target.value });
+                        setActiveField("depart");
+                        setSuggestionActiveIndex(-1);
+                        searchAddress(e.target.value, setDepartSuggestions);
+                      }}
+                      onFocus={() => { setActiveField("depart"); setSuggestionActiveIndex(-1); }}
+                      onBlur={() => setTimeout(() => setActiveField((f) => (f === "depart" ? null : f)), 120)}
+                      onKeyDown={(e) => handleAddressKeyDown("depart", e)}
+                      required
+                    />
                   </div>
-                )}
-                {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
-                  <div style={styles.suggestionBox}>
-                    {form.depart.trim().length < 3 && (
-                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
-                        Adresses récentes
-                      </div>
-                    )}
-                    {suggestionListFor("depart").map((s, i) => {
-                      const isRecent = !!s.recent;
-                      const label = isRecent ? s.address : shortAddress(s);
-                      const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
-                      const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
-                      return (
-                        <div
-                          key={isRecent ? `recent-${s.address}` : s.place_id}
-                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
-                          onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
-                          onMouseEnter={() => setSuggestionActiveIndex(i)}
-                        >
-                          <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                          <span style={{ flex: 1 }}>{label}</span>
-                          {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                  {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
+                    <div style={styles.suggestionBox}>
+                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
+                    </div>
+                  )}
+                  {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
+                    <div style={styles.suggestionBox}>
+                      {form.depart.trim().length < 3 && (
+                        <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
+                          Adresses récentes
                         </div>
-                      );
-                    })}
+                      )}
+                      {suggestionListFor("depart").map((s, i) => {
+                        const isRecent = !!s.recent;
+                        const label = isRecent ? s.address : shortAddress(s);
+                        const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
+                        const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
+                        return (
+                          <div
+                            key={isRecent ? `recent-${s.address}` : s.place_id}
+                            style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
+                            onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
+                            onMouseEnter={() => setSuggestionActiveIndex(i)}
+                          >
+                            <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+                            <span style={{ flex: 1 }}>{label}</span>
+                            {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                    <input
+                      style={styles.routeRowInput}
+                      placeholder="Adresse d'arrivée"
+                      value={form.arrivee}
+                      onChange={(e) => {
+                        setForm({ ...form, arrivee: e.target.value });
+                        setActiveField("arrivee");
+                        setSuggestionActiveIndex(-1);
+                        searchAddress(e.target.value, setArriveeSuggestions, debounceRefArrivee);
+                      }}
+                      onFocus={() => { setActiveField("arrivee"); setSuggestionActiveIndex(-1); }}
+                      onBlur={() => setTimeout(() => setActiveField((f) => (f === "arrivee" ? null : f)), 120)}
+                      onKeyDown={(e) => handleAddressKeyDown("arrivee", e)}
+                      required
+                    />
                   </div>
-                )}
-              </div>
-            </label>
-            <label style={styles.formLabel}>
-              Adresse d'arrivée
-              <div style={{ position: "relative" }}>
-                <input
-                  style={styles.input}
-                  placeholder="Ex: Hôpital Civil, Strasbourg"
-                  value={form.arrivee}
-                  onChange={(e) => {
-                    setForm({ ...form, arrivee: e.target.value });
-                    setActiveField("arrivee");
-                    setSuggestionActiveIndex(-1);
-                    searchAddress(e.target.value, setArriveeSuggestions, debounceRefArrivee);
-                  }}
-                  onFocus={() => { setActiveField("arrivee"); setSuggestionActiveIndex(-1); }}
-                  onBlur={() => setTimeout(() => setActiveField((f) => (f === "arrivee" ? null : f)), 120)}
-                  onKeyDown={(e) => handleAddressKeyDown("arrivee", e)}
-                  required
-                />
-                {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
-                  <div style={styles.suggestionBox}>
-                    <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
-                  </div>
-                )}
-                {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
-                  <div style={styles.suggestionBox}>
-                    {form.arrivee.trim().length < 3 && (
-                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
-                        Adresses récentes
-                      </div>
-                    )}
-                    {suggestionListFor("arrivee").map((s, i) => {
-                      const isRecent = !!s.recent;
-                      const label = isRecent ? s.address : shortAddress(s);
-                      const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
-                      const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
-                      return (
-                        <div
-                          key={isRecent ? `recent-${s.address}` : s.place_id}
-                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
-                          onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
-                          onMouseEnter={() => setSuggestionActiveIndex(i)}
-                        >
-                          <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                          <span style={{ flex: 1 }}>{label}</span>
-                          {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                  {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
+                    <div style={styles.suggestionBox}>
+                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
+                    </div>
+                  )}
+                  {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
+                    <div style={styles.suggestionBox}>
+                      {form.arrivee.trim().length < 3 && (
+                        <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
+                          Adresses récentes
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
+                      )}
+                      {suggestionListFor("arrivee").map((s, i) => {
+                        const isRecent = !!s.recent;
+                        const label = isRecent ? s.address : shortAddress(s);
+                        const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
+                        const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
+                        return (
+                          <div
+                            key={isRecent ? `recent-${s.address}` : s.place_id}
+                            style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
+                            onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
+                            onMouseEnter={() => setSuggestionActiveIndex(i)}
+                          >
+                            <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+                            <span style={{ flex: 1 }}>{label}</span>
+                            {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button type="button" onClick={swapDepartArrivee} style={styles.swapBtn} aria-label="Inverser départ et arrivée" title="Inverser départ et arrivée">
+                  ⇅
+                </button>
               </div>
-            </label>
+            </div>
             <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
               <button
                 type="button"
@@ -3831,9 +3834,14 @@ const styles = {
   },
   swapBtn: {
     position: "absolute", right: -6, top: "50%", transform: "translateY(-50%)", zIndex: 5,
-    background: "#FFB43A", color: "#1A1206", border: "none", borderRadius: "50%",
-    width: 32, height: 32, cursor: "pointer", fontSize: 14, fontWeight: 700,
+    background: "#FFB43A", color: "#1A1206", border: "3px solid #191C21", borderRadius: "50%",
+    width: 34, height: 34, cursor: "pointer", fontSize: 14, fontWeight: 700,
     display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  routeCard: { position: "relative", background: "#191C21", border: "1px solid #23272E", borderRadius: 14, marginTop: 7 },
+  routeRowInput: {
+    border: "none", background: "transparent", outline: "none", color: "#F2F4F7",
+    fontSize: 15, fontWeight: 600, fontFamily: "'Manrope', sans-serif", padding: 0, flex: 1, minWidth: 0,
   },
   tpmrBadge: {
     fontSize: 10, fontWeight: 700, color: "#1A1206", background: "#8A9099",
