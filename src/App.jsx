@@ -707,6 +707,32 @@ function isGrandeVilleZone(city, dept) {
   return false;
 }
 
+function stripAccents(s) {
+  return Array.from((s || "").normalize("NFD"))
+    .filter((ch) => ch.codePointAt(0) < 0x0300 || ch.codePointAt(0) > 0x036f)
+    .join("");
+}
+
+// Établissements limitrophes bénéficiant du forfait "grande ville" par exception malgré une
+// commune hors de la liste officielle — validés par la Cnam (liste des établissements par
+// extension au 01/04/2026, publiée sur ameli.fr). Le service de recherche d'adresse utilisé par
+// l'appli ne référence pas correctement tous ces établissements (ex: UGECAM Illkirch n'apparaît
+// que comme un arrêt de bus, Clinique du Ried pas du tout), d'où une détection sur le texte de
+// l'adresse saisie plutôt que sur la commune géocodée. Chaque entrée est un groupe de mots-clés
+// qui doivent TOUS apparaître, pour éviter les faux positifs (ex: "Ugecam" seul existe dans
+// plusieurs villes en France qui ne bénéficient pas du forfait).
+const GRANDE_VILLE_EXTENSION_MATCHERS = [
+  ["cmco"], // Centre Médico-Chirurgical et Obstétrical, Schiltigheim
+  ["medico-chirurgical", "schiltigheim"], // même établissement, nom complet
+  ["ugecam", "illkirch"], // UGECAM Alsace, Illkirch
+  ["clinique du ried"], // Clinique du Ried, Schiltigheim
+];
+
+function matchesGrandeVilleExtension(addressText) {
+  const norm = stripAccents((addressText || "").toLowerCase());
+  return GRANDE_VILLE_EXTENSION_MATCHERS.some((group) => group.every((kw) => norm.includes(kw)));
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1425,23 +1451,26 @@ export default function App() {
   }, [form.heure, form.type]);
 
   // Coche/décoche automatiquement le forfait "grande ville" dès que le départ ou l'arrivée
-  // change, selon la liste officielle (arrêté du 29 juillet 2025). Ne couvre pas les
-  // établissements limitrophes ajoutés par exception par la CPAM — le chauffeur garde la main
-  // pour ces cas particuliers.
+  // change, selon la liste officielle (arrêté du 29 juillet 2025) et la liste des établissements
+  // limitrophes ajoutés par extension par la Cnam. Le chauffeur garde la main pour corriger au
+  // cas où un autre établissement limitrophe non répertorié ici en bénéficierait aussi.
   useEffect(() => {
     if (form.type !== "taxi") return;
     const orig = editOriginalTarifInputs.current;
     if (
       orig &&
       orig.departCity === form.departCity && orig.departDept === form.departDept &&
-      orig.arriveeCity === form.arriveeCity && orig.arriveeDept === form.arriveeDept
+      orig.arriveeCity === form.arriveeCity && orig.arriveeDept === form.arriveeDept &&
+      orig.depart === form.depart && orig.arrivee === form.arrivee
     ) {
       return; // adresses inchangées depuis l'ouverture de la modification
     }
-    const auto = isGrandeVilleZone(form.departCity, form.departDept) || isGrandeVilleZone(form.arriveeCity, form.arriveeDept);
+    const auto =
+      isGrandeVilleZone(form.departCity, form.departDept) || isGrandeVilleZone(form.arriveeCity, form.arriveeDept) ||
+      matchesGrandeVilleExtension(form.depart) || matchesGrandeVilleExtension(form.arrivee);
     setForm((f) => (f.grandeVille === auto ? f : { ...f, grandeVille: auto }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.departCity, form.departDept, form.arriveeCity, form.arriveeDept, form.type]);
+  }, [form.departCity, form.departDept, form.arriveeCity, form.arriveeDept, form.depart, form.arrivee, form.type]);
 
   // Recalcule automatiquement le tarif "Taxi conventionné" dès que la distance,
   // le trajet ou les majorations changent — plus besoin de cliquer sur un bouton.
@@ -1543,6 +1572,7 @@ export default function App() {
     editOriginalTarifInputs.current = {
       departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
       departCity: r.departCity || "", departDept: r.departDept || "", arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
+      depart: r.depart, arrivee: r.arrivee,
       trajet: r.trajet, grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, tpmr: r.tpmr || false, heure: r.heure,
     };
@@ -2526,7 +2556,7 @@ export default function App() {
                     onChange={(e) => setForm({ ...form, majorationNuitWeekend: e.target.checked })} />
                   Nuit/dimanche/férié (+50 %) — détecté automatiquement
                 </label>
-                <label style={styles.checkboxRow} title="Marseille, Paris, Nice, Toulouse, Lyon, Strasbourg, Montpellier, Rennes, Bordeaux, Lille, Grenoble, Nantes, ou départements 92/93/94 — coche-la toi-même pour un établissement limitrophe non détecté">
+                <label style={styles.checkboxRow} title="Marseille, Paris, Nice, Toulouse, Lyon, Strasbourg, Montpellier, Rennes, Bordeaux, Lille, Grenoble, Nantes, départements 92/93/94, ou CMCO/Clinique du Ried (Schiltigheim) et UGECAM (Illkirch) — coche-la toi-même pour un autre établissement limitrophe non détecté">
                   <input type="checkbox" checked={form.grandeVille}
                     onChange={(e) => setForm({ ...form, grandeVille: e.target.checked })} />
                   Forfait grande ville (+15 €) — détecté automatiquement
