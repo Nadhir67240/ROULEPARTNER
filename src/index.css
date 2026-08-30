@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+:root {
+  --asphalt: #14161C;
+  --asphalt-light: #1D2029;
+  --beacon-amber: #F5A623;
+  --route-green: #3DDC84;
+  --signal-red: #E5484D;
+  --dispatch-blue: #4EA1F5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--asphalt);
+  font-family: 'Inter', -apple-system, sans-serif;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+/* Titres et libellés structurants — la police "technique" du dispatch */
+.rp-display {
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: 0.01em;
+}
+
+/* L'élément signature : les tarifs et distances affichés comme un vrai
+   compteur de taxi lumineux — chiffres alignés, légère lueur ambrée. */
+.rp-meter {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--beacon-amber);
+  text-shadow: 0 0 10px rgba(245, 166, 35, 0.4);
+}
+
+/* Le badge "urgent" pulse comme un gyrophare plutôt que d'être juste rouge. */
+@keyframes rp-beacon-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.06); }
+}
+.rp-beacon-pulse {
+  animation: rp-beacon-pulse 1.1s ease-in-out infinite;
+}
+
+/* Légère respiration du point vert "en service" dans le logo. */
+@keyframes rp-beacon-glow {
+  0%, 100% { box-shadow: 0 0 4px 1px rgba(61, 220, 132, 0.6); }
+  50% { box-shadow: 0 0 9px 3px rgba(61, 220, 132, 0.9); }
+}
+.rp-logo-beacon {
+  animation: rp-beacon-glow 2s ease-in-out infinite;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #333844;
+  border-radius: 4px;
+}
+
+/* Les contrôles internes de Leaflet (zoom, attribution) ont par défaut un
+   niveau d'empilement très élevé (jusqu'à 1000) qui peut passer au-dessus
+   de la barre de navigation du bas — on les plafonne bien en dessous. */
+.leaflet-pane, .leaflet-top, .leaflet-bottom, .leaflet-control {
+  z-index: 20 !important;
+}
