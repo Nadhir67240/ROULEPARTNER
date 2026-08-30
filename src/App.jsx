@@ -406,6 +406,10 @@ function shortAddress(s) {
     const parts = [poiName, locality].filter(Boolean);
     return parts.length ? parts.join(", ") : s.display_name;
   }
+  // Sans nom de commune, "5 rue du Rhin, 67240" ou pire, juste "67240", n'aide personne à
+  // identifier le lieu — mieux vaut alors le nom complet renvoyé par le service de recherche
+  // (qui liste toujours au moins la commune) que ce format compact mais incomplet.
+  if (!locality) return s.display_name;
   const parts = [street, locality, postcode].filter(Boolean);
   return parts.length ? parts.join(", ") : s.display_name;
 }
