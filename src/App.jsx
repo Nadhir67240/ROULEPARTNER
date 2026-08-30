@@ -16,10 +16,10 @@ import {
 } from "./firebase";
 
 const TYPES = [
-  { id: "taxi", label: "Taxi conventionné", color: "#F5A623" },
-  { id: "vsl", label: "VSL", color: "#3DDC84" },
-  { id: "ambulance", label: "Ambulance", color: "#E5484D" },
-  { id: "taxi_payant", label: "🚕 Course (taxi payante) 💵", color: "#4EA1F5" },
+  { id: "taxi", label: "Taxi conventionné", color: "#FFB43A" },
+  { id: "vsl", label: "VSL", color: "#3BD07A" },
+  { id: "ambulance", label: "Ambulance", color: "#E86E5E" },
+  { id: "taxi_payant", label: "Course payante", color: "#8FB3F5" },
 ];
 
 const TRAJET_TYPES = [
@@ -135,6 +135,16 @@ function uid() {
 
 function typeMeta(id) {
   return TYPES.find((t) => t.id === id) || TYPES[0];
+}
+
+// Fond teinté à faible opacité pour la pastille de type (texte de la même teinte que le fond) —
+// une pastille sobre plutôt qu'un badge plein, l'ambre reste réservé aux actions.
+function tintBg(hex, alpha) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 function formatPostedAt(ts) {
@@ -756,10 +766,10 @@ export default function App() {
   const [selectedRide, setSelectedRide] = useState(null);
   const [accountSubPanel, setAccountSubPanel] = useState(null); // null | "profile" | "settings" | "company"
   const [newEmailInput, setNewEmailInput] = useState("");
-  const [emailChangeStatus, setEmailChangeStatus] = useState("");
+  const [emailChangeStatus, setEmailChangeStatus] = useState(null); // null | { ok, text }
   const [communeInput, setCommuneInput] = useState("");
   const [licenseInput, setLicenseInput] = useState("");
-  const [licenseChangeStatus, setLicenseChangeStatus] = useState("");
+  const [licenseChangeStatus, setLicenseChangeStatus] = useState(null); // null | { ok, text }
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showQuickMenu, setShowQuickMenu] = useState(false);
@@ -820,32 +830,34 @@ export default function App() {
 
   const handleEmailChange = async () => {
     if (!newEmailInput.trim()) return;
-    setEmailChangeStatus("");
+    setEmailChangeStatus(null);
     try {
       await requestEmailChange(newEmailInput.trim());
-      setEmailChangeStatus("✅ Email de confirmation envoyé à " + newEmailInput.trim() + " — clique sur le lien reçu pour valider le changement.");
+      setEmailChangeStatus({ ok: true, text: "Email de confirmation envoyé à " + newEmailInput.trim() + " — clique sur le lien reçu pour valider le changement." });
       setNewEmailInput("");
     } catch (e) {
-      setEmailChangeStatus(
-        e.code === "auth/requires-recent-login"
+      setEmailChangeStatus({
+        ok: false,
+        text: e.code === "auth/requires-recent-login"
           ? "Pour ta sécurité, reconnecte-toi (déconnexion puis reconnexion) avant de changer d'email."
-          : "Échec de l'envoi — vérifie l'adresse et réessaie."
-      );
+          : "Échec de l'envoi — vérifie l'adresse et réessaie.",
+      });
     }
   };
 
   const handleLicenseChange = async () => {
     if (!licenseInput.trim()) return;
-    setLicenseChangeStatus("");
+    setLicenseChangeStatus(null);
     try {
       await changeDriverLicense(driverName, profiles[driverName]?.licenseNumber || "", licenseInput.trim(), communeInput.trim());
-      setLicenseChangeStatus("✅ Numéro de licence mis à jour.");
+      setLicenseChangeStatus({ ok: true, text: "Numéro de licence mis à jour." });
     } catch (e) {
-      setLicenseChangeStatus(
-        e.message === "license_taken"
+      setLicenseChangeStatus({
+        ok: false,
+        text: e.message === "license_taken"
           ? "Ce numéro de licence est déjà associé à un autre compte."
-          : "Échec de la mise à jour."
-      );
+          : "Échec de la mise à jour.",
+      });
     }
   };
 
@@ -1585,14 +1597,14 @@ export default function App() {
         // On ne touche à l'icône que si le statut a vraiment changé — la
         // recréer à chaque mise à jour de position perturbait le zoom sur la carte.
         if (mapMarkerStatusRef.current[name] !== statusKey) {
-          const carBg = isMe ? "#F5A623" : "#2A2E38";
-          const statusColor = isBusy ? "#E5484D" : "#3DDC84";
+          const carBg = isMe ? "#FFB43A" : "#23272E";
+          const statusColor = isBusy ? "#E5484D" : "#3BD07A";
           mapMarkersRef.current[name].setIcon(L.divIcon({
             className: "",
             html: `
               <div style="position:relative;width:34px;height:34px;">
-                <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid #14161C;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
-                <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid #14161C;"></span>
+                <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid #0F1114;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
+                <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid #0F1114;"></span>
               </div>
             `,
             iconSize: [34, 34],
@@ -1601,14 +1613,14 @@ export default function App() {
           mapMarkerStatusRef.current[name] = statusKey;
         }
       } else {
-        const carBg = isMe ? "#F5A623" : "#2A2E38";
-        const statusColor = isBusy ? "#E5484D" : "#3DDC84";
+        const carBg = isMe ? "#FFB43A" : "#23272E";
+        const statusColor = isBusy ? "#E5484D" : "#3BD07A";
         const icon = L.divIcon({
           className: "",
           html: `
             <div style="position:relative;width:34px;height:34px;">
-              <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid #14161C;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
-              <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid #14161C;"></span>
+              <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid #0F1114;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
+              <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid #0F1114;"></span>
             </div>
           `,
           iconSize: [34, 34],
@@ -1776,7 +1788,7 @@ export default function App() {
       <div style={styles.page}>
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
-            <Car size={30} color="#1C1F26" />
+            <Car size={30} color="#1A1206" />
             <span className="rp-logo-beacon" style={styles.logoBeaconLarge} />
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
@@ -1790,7 +1802,7 @@ export default function App() {
       <div style={styles.page}>
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
-            <Car size={30} color="#1C1F26" />
+            <Car size={30} color="#1A1206" />
             <span className="rp-logo-beacon" style={styles.logoBeaconLarge} />
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
@@ -1874,7 +1886,7 @@ export default function App() {
                 type="button"
                 onClick={handleForgotPassword}
                 disabled={authBusy}
-                style={{ background: "none", border: "none", color: "#9aa0ad", fontSize: 12.5, textAlign: "right", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                style={{ background: "none", border: "none", color: "#8A9099", fontSize: 12.5, textAlign: "right", cursor: "pointer", padding: 0, textDecoration: "underline" }}
               >
                 Mot de passe oublié ?
               </button>
@@ -1899,7 +1911,7 @@ export default function App() {
       <div style={styles.page}>
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
-            <Car size={30} color="#1C1F26" />
+            <Car size={30} color="#1A1206" />
             <span className="rp-logo-beacon" style={styles.logoBeaconLarge} />
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
@@ -1961,7 +1973,6 @@ export default function App() {
           .rp-fab-floating { display: flex !important; }
         }
       `}</style>
-      <div style={styles.cornerStripes} />
 
       {/* Alerte course prioritaire — s'affiche par-dessus n'importe quel écran
           de l'appli (accueil, carte, messages, compte...) sans faire sortir le
@@ -1991,7 +2002,7 @@ export default function App() {
               </p>
 
               <div style={styles.priorityAlertBody}>
-                <span style={{ ...styles.typeTag, background: meta.color, marginBottom: 10, display: "inline-flex" }}>
+                <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color, marginBottom: 10, display: "inline-flex" }}>
                   {meta.label}
                 </span>
                 {r.urgent && (
@@ -2039,71 +2050,29 @@ export default function App() {
         </div>
       )}
       <header style={styles.header}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={styles.logoBadge}>
-            <Car size={16} color="#1C1F26" />
-            <span className="rp-logo-beacon" style={styles.logoBeacon} />
+            <Car size={16} color="#1A1206" />
           </div>
-          <h1 style={styles.title}>RoulePartner</h1>
-          <span style={styles.statsTag}>🟠 {stats.disponibles} disponible{stats.disponibles > 1 ? "s" : ""} · 🟢 {stats.acceptees} acceptée{stats.acceptees > 1 ? "s" : ""}</span>
-          <span style={{ ...styles.statsTag, color: "#3DDC84" }}>
-            🟢 {onlineCount} en service
-          </span>
-        </div>
-        <div style={styles.headerRight}>
-          <span style={styles.driverTag}>
-            <User size={14} style={{ marginRight: 4 }} />
-            {driverName}
-          </span>
-          <button onClick={() => logOut()} style={styles.iconBtn} title="Se déconnecter">
-            <LogOut size={14} />
-          </button>
-        </div>
-      </header>
-
-      <div
-        style={{
-          margin: "14px 24px 0",
-          background: myPosStatus === "ok" ? "rgba(61,220,132,0.1)" : "#1D2029",
-          border: `1.5px solid ${myPosStatus === "ok" ? "#3DDC84" : "#3a3f4c"}`,
-          borderRadius: 14, padding: "14px 16px",
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-        }}
-      >
-        <div>
-          <div style={{
-            fontFamily: "'Space Grotesk', sans-serif", fontSize: 16, fontWeight: 700,
-            color: myPosStatus === "ok" ? "#3DDC84" : "#9aa0ad", display: "flex", alignItems: "center", gap: 8,
-          }}>
-            <span>{myPosStatus === "ok" ? "🟢" : "⚫"}</span>
-            {myPosStatus === "ok" ? "EN SERVICE" : "HORS SERVICE"}
-          </div>
-          <div style={{ fontSize: 12.5, color: "#9aa0ad", marginTop: 2 }}>
-            {myPosStatus === "ok"
-              ? "Tu reçois les nouvelles courses autour de toi"
-              : myPosStatus === "locating"
-              ? "Localisation en cours…"
-              : myPosStatus === "denied"
-              ? "Position refusée — vérifie les réglages du navigateur"
-              : "Active ta disponibilité pour recevoir des courses"}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <h1 style={styles.title}>RoulePartner</h1>
+            <span style={styles.headerSubtitle}>
+              {driverName}{profiles[driverName]?.commune ? ` · ${profiles[driverName].commune}` : ""}
+            </span>
           </div>
         </div>
         <button
           onClick={sharePosition}
           aria-label="Basculer en service / hors service"
-          style={{
-            width: 52, height: 30, borderRadius: 15, border: "none", cursor: "pointer",
-            background: myPosStatus === "ok" ? "#3DDC84" : "#3a3f4c",
-            position: "relative", flexShrink: 0, transition: "background 0.2s",
-          }}
+          style={{ ...styles.statusPill, ...(myPosStatus === "ok" ? styles.statusPillOn : styles.statusPillOff) }}
         >
-          <span style={{
-            position: "absolute", top: 3, left: myPosStatus === "ok" ? 25 : 3,
-            width: 24, height: 24, borderRadius: "50%", background: "#fff",
-            transition: "left 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
-          }} />
+          <span style={{ ...styles.statusDot, background: myPosStatus === "ok" ? "#3BD07A" : "#6E757E" }} />
+          {myPosStatus === "ok" ? "En service" : myPosStatus === "locating" ? "Localisation…" : "Hors service"}
         </button>
-      </div>
+      </header>
+      {myPosStatus === "denied" && (
+        <div style={styles.hintBanner}>Position refusée — vérifie les réglages du navigateur pour recevoir les courses proches de toi.</div>
+      )}
 
       <div className="rp-desktop-tabs" style={{ ...styles.tabs, gap: 8 }}>
         <button
@@ -2124,7 +2093,7 @@ export default function App() {
               : formatDayMonth(dateFilter)}
           </span>
           {dateFilter && dateFilter !== "week" && (
-            <span style={{ fontSize: 11, color: "#9aa0ad", fontWeight: 400 }}>{formatDayMonth(dateFilter)} ▾</span>
+            <span style={{ fontSize: 11, color: "#8A9099", fontWeight: 400 }}>{formatDayMonth(dateFilter)} ▾</span>
           )}
         </button>
         <div style={{ flex: 1 }} />
@@ -2137,7 +2106,7 @@ export default function App() {
               <h2 style={styles.modalTitle}>Filtrer par rayon</h2>
               <button onClick={() => setShowFilterMenu(false)} style={styles.iconBtn}><X size={16} /></button>
             </div>
-            <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 12 }}>
+            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 12 }}>
               Ne montrer que les courses dans ce rayon autour de toi (nécessite d'être "en service").
             </p>
             {["15", "30", "50", "100", "all"].map((v) => (
@@ -2146,9 +2115,9 @@ export default function App() {
                 onClick={() => { updateRadiusFilter(v); setShowFilterMenu(false); }}
                 style={{
                   ...styles.togglePill, width: "100%", marginBottom: 8, justifyContent: "flex-start",
-                  borderColor: radiusFilter === v ? "#F5A623" : "#3a3f4c",
-                  color: radiusFilter === v ? "#14161C" : "#c7cad1",
-                  background: radiusFilter === v ? "#F5A623" : "transparent",
+                  borderColor: radiusFilter === v ? "#FFB43A" : "#3A4048",
+                  color: radiusFilter === v ? "#1A1206" : "#B8BEC6",
+                  background: radiusFilter === v ? "#FFB43A" : "transparent",
                 }}
               >
                 {v === "all" ? "Toute distance" : `Rayon de ${v} km`}
@@ -2168,19 +2137,19 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button
                 onClick={() => { setDateFilter(dateFilter === todayKey(0) ? "" : todayKey(0)); setShowCalendarMenu(false); }}
-                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(0) ? "#F5A623" : "#3a3f4c", background: dateFilter === todayKey(0) ? "#F5A623" : "transparent", color: dateFilter === todayKey(0) ? "#14161C" : "#c7cad1" }}
+                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(0) ? "#FFB43A" : "#3A4048", background: dateFilter === todayKey(0) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(0) ? "#1A1206" : "#B8BEC6" }}
               >
                 Aujourd'hui
               </button>
               <button
                 onClick={() => { setDateFilter(dateFilter === todayKey(1) ? "" : todayKey(1)); setShowCalendarMenu(false); }}
-                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(1) ? "#F5A623" : "#3a3f4c", background: dateFilter === todayKey(1) ? "#F5A623" : "transparent", color: dateFilter === todayKey(1) ? "#14161C" : "#c7cad1" }}
+                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(1) ? "#FFB43A" : "#3A4048", background: dateFilter === todayKey(1) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(1) ? "#1A1206" : "#B8BEC6" }}
               >
                 Demain
               </button>
               <button
                 onClick={() => { setDateFilter(dateFilter === "week" ? "" : "week"); setShowCalendarMenu(false); }}
-                style={{ ...styles.togglePill, borderColor: dateFilter === "week" ? "#F5A623" : "#3a3f4c", background: dateFilter === "week" ? "#F5A623" : "transparent", color: dateFilter === "week" ? "#14161C" : "#c7cad1" }}
+                style={{ ...styles.togglePill, borderColor: dateFilter === "week" ? "#FFB43A" : "#3A4048", background: dateFilter === "week" ? "#FFB43A" : "transparent", color: dateFilter === "week" ? "#1A1206" : "#B8BEC6" }}
               >
                 Cette semaine
               </button>
@@ -2219,7 +2188,7 @@ export default function App() {
         <div style={styles.errorBanner}>
           {error}
           <button onClick={() => setError("")} style={{ background: "none", border: "none", cursor: "pointer" }}>
-            <X size={14} color="#F1EFEA" />
+            <X size={14} color="#F2F4F7" />
           </button>
         </div>
       )}
@@ -2235,7 +2204,7 @@ export default function App() {
                 style={{
                   ...styles.typeChip,
                   borderColor: t.color,
-                  color: form.type === t.id ? "#14161C" : t.color,
+                  color: form.type === t.id ? "#1A1206" : t.color,
                   background: form.type === t.id ? t.color : "transparent",
                 }}
               >
@@ -2269,13 +2238,13 @@ export default function App() {
                 />
                 {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
                   <div style={styles.suggestionBox}>
-                    <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default" }}>Recherche…</div>
+                    <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
                   </div>
                 )}
                 {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
                   <div style={styles.suggestionBox}>
                     {form.depart.trim().length < 3 && (
-                      <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #2A2E38" }}>
+                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
                         Adresses récentes
                       </div>
                     )}
@@ -2287,7 +2256,7 @@ export default function App() {
                       return (
                         <div
                           key={isRecent ? `recent-${s.address}` : s.place_id}
-                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#2A2E38" : undefined }}
+                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
                           onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
                           onMouseEnter={() => setSuggestionActiveIndex(i)}
                         >
@@ -2321,13 +2290,13 @@ export default function App() {
                 />
                 {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
                   <div style={styles.suggestionBox}>
-                    <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default" }}>Recherche…</div>
+                    <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
                   </div>
                 )}
                 {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
                   <div style={styles.suggestionBox}>
                     {form.arrivee.trim().length < 3 && (
-                      <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #2A2E38" }}>
+                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
                         Adresses récentes
                       </div>
                     )}
@@ -2339,7 +2308,7 @@ export default function App() {
                       return (
                         <div
                           key={isRecent ? `recent-${s.address}` : s.place_id}
-                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#2A2E38" : undefined }}
+                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
                           onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
                           onMouseEnter={() => setSuggestionActiveIndex(i)}
                         >
@@ -2382,8 +2351,8 @@ export default function App() {
             <label style={styles.fieldLabel}>
               Tarif estimé (€) {form.type === "taxi" && (
                 calculatingTarif
-                  ? <span style={{ color: "#F5A623", fontWeight: 400 }}>— calcul en cours…</span>
-                  : <span style={{ color: "#3DDC84", fontWeight: 400 }}>— calculé automatiquement</span>
+                  ? <span style={{ color: "#FFB43A", fontWeight: 400 }}>— calcul en cours…</span>
+                  : <span style={{ color: "#3BD07A", fontWeight: 400 }}>— calculé automatiquement</span>
               )}
               <input style={{ ...styles.input, width: "100%" }} placeholder="Ex: 65" value={form.tarif}
                 onChange={(e) => setForm({ ...form, tarif: e.target.value })} />
@@ -2429,9 +2398,9 @@ export default function App() {
                     onClick={() => setForm({ ...form, trajet: t.id })}
                     style={{
                       ...styles.typeChip,
-                      borderColor: "#3a3f4c",
-                      color: form.trajet === t.id ? "#14161C" : "#c7cad1",
-                      background: form.trajet === t.id ? "#F5A623" : "transparent",
+                      borderColor: "#3A4048",
+                      color: form.trajet === t.id ? "#1A1206" : "#B8BEC6",
+                      background: form.trajet === t.id ? "#FFB43A" : "transparent",
                     }}
                   >
                     {t.label}
@@ -2445,8 +2414,8 @@ export default function App() {
                 onClick={() => setForm({ ...form, urgent: !form.urgent })}
                 style={{
                   ...styles.togglePill,
-                  borderColor: form.urgent ? "#E5484D" : "#3a3f4c",
-                  color: form.urgent ? "#fff" : "#c7cad1",
+                  borderColor: form.urgent ? "#E5484D" : "#3A4048",
+                  color: form.urgent ? "#fff" : "#B8BEC6",
                   background: form.urgent ? "#E5484D" : "transparent",
                 }}
               >
@@ -2457,9 +2426,9 @@ export default function App() {
                 onClick={() => setForm({ ...form, tpmr: !form.tpmr })}
                 style={{
                   ...styles.togglePill,
-                  borderColor: form.tpmr ? "#4EA1F5" : "#3a3f4c",
-                  color: form.tpmr ? "#fff" : "#c7cad1",
-                  background: form.tpmr ? "#4EA1F5" : "transparent",
+                  borderColor: form.tpmr ? "#8FB3F5" : "#3A4048",
+                  color: form.tpmr ? "#fff" : "#B8BEC6",
+                  background: form.tpmr ? "#8FB3F5" : "transparent",
                 }}
               >
                 ♿ TPMR
@@ -2534,7 +2503,7 @@ export default function App() {
                 </button>
               </label>
               {form.document && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#9aa0ad" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8A9099" }}>
                   📄 {form.documentName || "bon-de-transport.pdf"}
                   <button
                     type="button"
@@ -2551,7 +2520,7 @@ export default function App() {
 
           <div style={{
             display: "flex", gap: 10, position: "sticky", bottom: 0,
-            background: "#1D2029", padding: "12px 0 2px", marginTop: 4,
+            background: "#191C21", padding: "12px 0 2px", marginTop: 4,
           }}>
             <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); }} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
               Annuler
@@ -2565,12 +2534,12 @@ export default function App() {
 
       {filter === "carte" ? (
         <main style={{ padding: "0 24px" }}>
-          <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 6 }}>
+          <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 6 }}>
             {mapDrivers.length === 0
               ? "Aucun chauffeur ne partage sa position pour l'instant."
               : `${mapDrivers.length} chauffeur${mapDrivers.length > 1 ? "s" : ""} visible${mapDrivers.length > 1 ? "s" : ""} (position partagée il y a moins de 15 min)${radiusFilter !== "all" && myPosForMap ? `, dans un rayon de ${radiusFilter} km` : ""}.`}
           </p>
-          <p style={{ color: "#6b7080", fontSize: 12, marginBottom: 12, display: "flex", gap: 14 }}>
+          <p style={{ color: "#6E757E", fontSize: 12, marginBottom: 12, display: "flex", gap: 14 }}>
             <span>🟢 Libre</span>
             <span>🔴 En course</span>
             <span>🟠 Toi</span>
@@ -2579,7 +2548,7 @@ export default function App() {
         </main>
       ) : filter === "planning" ? (
         <main style={{ padding: "0 24px" }}>
-          <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 16 }}>
+          <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>
             Les courses que tu as ajoutées toi-même à ton planning (bouton "Ajouter au planning" sur chaque
             course), classées par heure. Les temps de trajet sont estimés à vol d'oiseau (~{AVG_SPEED_KMH} km/h
             en moyenne) : prévois une marge, ce n'est pas un vrai calcul d'itinéraire routier.
@@ -2593,8 +2562,8 @@ export default function App() {
                   <div
                     style={{
                       ...styles.planningGap,
-                      borderColor: gapInfo.tight ? "#E5484D" : "#3a3f4c",
-                      color: gapInfo.tight ? "#E5484D" : "#6b7080",
+                      borderColor: gapInfo.tight ? "#E5484D" : "#3A4048",
+                      color: gapInfo.tight ? "#E5484D" : "#6E757E",
                     }}
                   >
                     {gapInfo.distKm != null ? (
@@ -2614,13 +2583,13 @@ export default function App() {
                   onClick={() => setSelectedRide(r)}
                 >
                   <div style={styles.cardHeader}>
-                    <span style={{ ...styles.typeTag, background: typeMeta(r.type).color }}>
+                    <span style={{ ...styles.typeTag, background: tintBg(typeMeta(r.type).color, 0.12), color: typeMeta(r.type).color }}>
                       {typeMeta(r.type).label}
                     </span>
-                    <span style={{ fontWeight: 700, color: "#F5A623" }}>{r.heure}</span>
+                    <span style={{ fontWeight: 700, color: "#FFB43A" }}>{r.heure}</span>
                   </div>
                   <div style={styles.route}>
-                    <MapPin size={14} color="#F5A623" />
+                    <MapPin size={14} color="#FFB43A" />
                     <span>{r.depart}</span>
                     <span style={{ color: "#5b6070" }}>→</span>
                     <span>{r.arrivee}</span>
@@ -2647,7 +2616,7 @@ export default function App() {
         {visibleRides.length === 0 ? (
           <div style={styles.emptyState}>
             <div style={styles.emptyIcon}>
-              <Car size={32} color="#3a3f4c" />
+              <Car size={32} color="#3A4048" />
             </div>
             <p style={styles.emptyTitle}>
               {filter === "dispo" ? "Aucune course disponible pour l'instant" : "Rien à afficher ici"}
@@ -2689,13 +2658,13 @@ export default function App() {
                   </div>
                 )}
                 <div style={styles.cardHeader}>
-                  <span style={{ ...styles.typeTag, background: meta.color }}>
+                  <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
                     {r.type === "ambulance" ? <Stethoscope size={12} style={{ marginRight: 4 }} /> : <Car size={12} style={{ marginRight: 4 }} />}
                     {meta.label}
                   </span>
                   <span style={{
                     ...styles.statusTag,
-                    color: r.status === "disponible" ? "#3DDC84" : r.status === "en_attente" ? "#F5A623" : r.status === "en_cours" ? "#F5A623" : r.status === "terminee" ? "#6b7080" : "#F5A623",
+                    color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
                   }}>
                     {r.status === "disponible" ? "Disponible"
                       : r.status === "en_attente" ? `En attente (${r.pendingBy})`
@@ -2711,7 +2680,7 @@ export default function App() {
                   {r.tpmr && (
                     <span style={styles.tpmrBadge} title="Transport de personne à mobilité réduite">TPMR</span>
                   )}
-                  <MapPin size={14} color="#F5A623" />
+                  <MapPin size={14} color="#FFB43A" />
                   <span>{cardLocality(r.depart)}</span>
                   <span style={{ color: "#5b6070" }}>→</span>
                   <span>{cardLocality(r.arrivee)}</span>
@@ -2730,13 +2699,13 @@ export default function App() {
                     <a
                       href={`tel:${r.patientTel.replace(/\s/g, "")}`}
                       onClick={(e) => e.stopPropagation()}
-                      style={{ ...styles.metaItem, color: "#F5A623", textDecoration: "underline" }}
+                      style={{ ...styles.metaItem, color: "#FFB43A", textDecoration: "underline" }}
                     >
                       📞 {r.patientTel}
                     </a>
                   )}
                   {r._dist != null && (
-                    <span style={{ ...styles.metaItem, color: "#F5A623", fontWeight: 600 }}>
+                    <span style={{ ...styles.metaItem, color: "#FFB43A", fontWeight: 600 }}>
                       <Navigation size={12} /> À {r._dist.toFixed(1)} km de vous · ~{Math.round((r._dist / AVG_SPEED_KMH) * 60)} min
                     </span>
                   )}
@@ -2850,7 +2819,7 @@ export default function App() {
           <div style={styles.modalOverlay} onClick={() => setSelectedRide(null)}>
             <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
               <div style={styles.modalHeader}>
-                <span style={{ ...styles.typeTag, background: meta.color }}>
+                <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
                   {r.type === "ambulance" ? <Stethoscope size={12} style={{ marginRight: 4 }} /> : <Car size={12} style={{ marginRight: 4 }} />}
                   {meta.label}
                 </span>
@@ -2869,7 +2838,7 @@ export default function App() {
               <h2 style={styles.modalTitle}>{r.depart} → {r.arrivee}</h2>
 
               <div style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 12, color: "#9aa0ad", fontWeight: 600 }}>🧭 Se guider vers le départ</span>
+                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600 }}>🧭 Se guider vers le départ</span>
                 <div style={styles.navRow}>
                   <a href={wazeUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnWaze }}>
                     <span style={{ ...styles.navBtnDot, background: "#05C8F7" }}>W</span> Waze
@@ -2880,7 +2849,7 @@ export default function App() {
                 </div>
               </div>
               <div style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 12, color: "#9aa0ad", fontWeight: 600 }}>🏁 Se guider vers l'arrivée</span>
+                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600 }}>🏁 Se guider vers l'arrivée</span>
                 <div style={styles.navRow}>
                   <a href={wazeUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnWaze }}>
                     <span style={{ ...styles.navBtnDot, background: "#05C8F7" }}>W</span> Waze
@@ -2893,7 +2862,7 @@ export default function App() {
 
               <div style={styles.modalGrid}>
                 <div style={styles.modalRow}>
-                  <Clock size={16} color="#F5A623" />
+                  <Clock size={16} color="#FFB43A" />
                   <span>Prise en charge {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
                 </div>
                 {r.tarif && (
@@ -2903,14 +2872,14 @@ export default function App() {
                 )}
                 {r.calcDistanceKm != null && (
                   <div style={styles.modalRow}>
-                    <span style={{ color: "#9aa0ad", fontSize: 13 }}>
+                    <span style={{ color: "#8A9099", fontSize: 13 }}>
                       Distance {r.calcIsRoadDistance ? "routière réelle" : "estimée (à vol d'oiseau)"} : {r.calcDistanceKm} km
                     </span>
                   </div>
                 )}
                 {r.patient && (
                   <div style={styles.modalRow}>
-                    <User size={16} color="#9aa0ad" />
+                    <User size={16} color="#8A9099" />
                     <span>Patient : {r.patient}</span>
                   </div>
                 )}
@@ -2929,13 +2898,13 @@ export default function App() {
                 )}
                 {dist != null && (
                   <div style={styles.modalRow}>
-                    <Navigation size={16} color="#F5A623" />
+                    <Navigation size={16} color="#FFB43A" />
                     <span>{dist.toFixed(1)} km de toi</span>
                   </div>
                 )}
                 <div style={styles.modalRow}>
                   <span style={{
-                    color: r.status === "disponible" ? "#3DDC84" : r.status === "en_attente" ? "#F5A623" : r.status === "en_cours" ? "#F5A623" : r.status === "terminee" ? "#6b7080" : "#F5A623",
+                    color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
                     fontWeight: 600,
                   }}>
                     {r.status === "disponible" ? "Disponible"
@@ -2946,7 +2915,7 @@ export default function App() {
                   </span>
                 </div>
                 <div style={styles.modalRow}>
-                  <span style={{ color: "#6b7080", fontSize: 13 }}>Posté par {r.postedBy} · publiée le {formatPostedAt(r.createdAt)}</span>
+                  <span style={{ color: "#6E757E", fontSize: 13 }}>Posté par {r.postedBy} · publiée le {formatPostedAt(r.createdAt)}</span>
                 </div>
                 {!mine && profiles[r.postedBy]?.phone && (
                   <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -2961,7 +2930,7 @@ export default function App() {
                 {(mine || takenByMe || pendingByMe) && (
                   <button
                     onClick={() => setChatRideId(r.id)}
-                    style={{ ...styles.contactBtn, width: "100%", marginTop: 8, background: "#F5A623", color: "#1C1F26", border: "none", fontWeight: 700 }}
+                    style={{ ...styles.contactBtn, width: "100%", marginTop: 8, background: "#FFB43A", color: "#1A1206", border: "none", fontWeight: 700 }}
                   >
                     💬 Discuter dans l'appli
                   </button>
@@ -2993,7 +2962,7 @@ export default function App() {
                 </button>
               )}
               {r.document && !mine && !takenByMe && !pendingByMe && (
-                <p style={{ color: "#6b7080", fontSize: 12, marginTop: 10 }}>
+                <p style={{ color: "#6E757E", fontSize: 12, marginTop: 10 }}>
                   📄 Un bon de transport est joint — accessible une fois la course prise.
                 </p>
               )}
@@ -3101,7 +3070,7 @@ export default function App() {
       <nav className="rp-bottom-nav" style={styles.bottomNav}>
         <button
           onClick={() => setFilter("dispo")}
-          style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "#F5A623" : "#9aa0ad", position: "relative" }}
+          style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "#FFB43A" : "#8A9099", position: "relative" }}
         >
           <Home size={20} />
           {newRidesBadge > 0 && (
@@ -3111,7 +3080,7 @@ export default function App() {
         </button>
         <button
           onClick={() => setFilter("mine")}
-          style={{ ...styles.bottomNavBtn, color: filter === "mine" ? "#F5A623" : "#9aa0ad" }}
+          style={{ ...styles.bottomNavBtn, color: filter === "mine" ? "#FFB43A" : "#8A9099" }}
         >
           <Car size={20} />
           <span style={styles.bottomNavLabel}>Courses</span>
@@ -3131,7 +3100,7 @@ export default function App() {
         </button>
       </nav>
       <button onClick={() => setShowQuickMenu(true)} className="rp-fab-floating" style={styles.bottomNavFabFloating}>
-        <Plus size={26} color="#14161C" />
+        <Plus size={26} color="#1A1206" />
       </button>
 
       {showQuickMenu && (
@@ -3222,7 +3191,7 @@ export default function App() {
 
             {!accountSubPanel && (
               <>
-                <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 16 }}>{user?.email}</p>
+                <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>{user?.email}</p>
                 <div style={styles.earningsBanner}>
                   Tu as gagné <strong>{myEarnings.toFixed(2)} €</strong> {earningsLabel}
                 </div>
@@ -3230,20 +3199,20 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
                   <button onClick={() => setAccountSubPanel("profile")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}>👤 Modifier mon profil</span>
-                    <span style={{ color: "#6b7080" }}>›</span>
+                    <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("settings")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}>⚙️ Réglages (service, notifications)</span>
-                    <span style={{ color: "#6b7080" }}>›</span>
+                    <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("company")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}>🏢 Ma société</span>
-                    <span style={{ color: "#6b7080" }}>›</span>
+                    <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   {isAdmin && (
                     <button
                       onClick={() => { setShowAdminPanel(true); setShowAccountPanel(false); }}
-                      style={{ ...styles.categoryBtn, borderColor: "#F5A623", color: "#F5A623" }}
+                      style={{ ...styles.categoryBtn, borderColor: "#FFB43A", color: "#FFB43A" }}
                     >
                       <span style={styles.categoryBtnLeft}>🛡️ Administration</span>
                       <span>›</span>
@@ -3264,14 +3233,14 @@ export default function App() {
                 <label style={styles.fieldLabel}>
                   Pseudo
                   <input style={{ ...styles.input, opacity: 0.6 }} value={driverName} disabled />
-                  <span style={{ color: "#6b7080", fontSize: 12, fontWeight: 400 }}>
+                  <span style={{ color: "#6E757E", fontSize: 12, fontWeight: 400 }}>
                     Fixe — il sert d'identifiant technique pour tes courses et messages. Contacte l'administrateur si tu as vraiment besoin d'en changer.
                   </span>
                 </label>
 
                 <label style={styles.fieldLabel}>
                   Adresse email de connexion
-                  <span style={{ color: "#9aa0ad", fontSize: 13, fontWeight: 400 }}>Actuelle : {user?.email}</span>
+                  <span style={{ color: "#8A9099", fontSize: 13, fontWeight: 400 }}>Actuelle : {user?.email}</span>
                   <div style={{ display: "flex", gap: 6 }}>
                     <input
                       type="email"
@@ -3285,8 +3254,8 @@ export default function App() {
                     </button>
                   </div>
                   {emailChangeStatus && (
-                    <span style={{ fontSize: 12.5, color: emailChangeStatus.startsWith("✅") ? "#3DDC84" : "#E5484D" }}>
-                      {emailChangeStatus}
+                    <span style={{ fontSize: 12.5, color: emailChangeStatus.ok ? "#3BD07A" : "#E5484D" }}>
+                      {emailChangeStatus.text}
                     </span>
                   )}
                 </label>
@@ -3359,8 +3328,8 @@ export default function App() {
                     </button>
                   </div>
                   {licenseChangeStatus && (
-                    <span style={{ fontSize: 12.5, color: licenseChangeStatus.startsWith("✅") ? "#3DDC84" : "#E5484D" }}>
-                      {licenseChangeStatus}
+                    <span style={{ fontSize: 12.5, color: licenseChangeStatus.ok ? "#3BD07A" : "#E5484D" }}>
+                      {licenseChangeStatus.text}
                     </span>
                   )}
                 </label>
@@ -3390,8 +3359,8 @@ export default function App() {
                   }}
                   style={{
                     ...styles.btnGhost,
-                    borderColor: myPosStatus === "ok" ? "#3DDC84" : "#3a3f4c",
-                    color: myPosStatus === "ok" ? "#3DDC84" : "#F1EFEA",
+                    borderColor: myPosStatus === "ok" ? "#3BD07A" : "#3A4048",
+                    color: myPosStatus === "ok" ? "#3BD07A" : "#F2F4F7",
                     textAlign: "left",
                   }}
                 >
@@ -3404,8 +3373,8 @@ export default function App() {
                     disabled={notifPermission === "granted"}
                     style={{
                       ...styles.btnGhost,
-                      borderColor: notifPermission === "granted" ? "#3DDC84" : "#3a3f4c",
-                      color: notifPermission === "granted" ? "#3DDC84" : "#F1EFEA",
+                      borderColor: notifPermission === "granted" ? "#3BD07A" : "#3A4048",
+                      color: notifPermission === "granted" ? "#3BD07A" : "#F2F4F7",
                       textAlign: "left",
                     }}
                   >
@@ -3482,7 +3451,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 16 }}>
+            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>
               {allKnownDriverNames.length} chauffeur{allKnownDriverNames.length > 1 ? "s" : ""} connu{allKnownDriverNames.length > 1 ? "s" : ""}.
               Bannir un chauffeur le déconnecte immédiatement et l'empêche de se reconnecter.
             </p>
@@ -3497,18 +3466,18 @@ export default function App() {
                     key={name}
                     style={{
                       display: "flex", alignItems: "center", justifyContent: "space-between",
-                      background: "#1C1F26", border: "1px solid #333844", borderRadius: 8, padding: "10px 12px",
+                      background: "#191C21", border: "1px solid #2A2F36", borderRadius: 8, padding: "10px 12px",
                       opacity: p.deleted ? 0.5 : 1,
                     }}
                   >
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {name} {name === driverName && "(toi)"}{" "}
-                        <span style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#3DDC84" : "#6b7080" }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#3BD07A" : "#6E757E" }}>
                           {isOnline ? "🟢 en ligne" : "⚪ hors ligne"}
                         </span>
                       </div>
-                      <div style={{ fontSize: 12, color: "#6b7080" }}>
+                      <div style={{ fontSize: 12, color: "#6E757E" }}>
                         {p.email || "email inconnu"} {p.phone && `· ${p.phone}`}
                         {p.licenseNumber && ` · Licence ${p.licenseNumber}`}
                         {p.commune && ` · ${p.commune}`}
@@ -3526,7 +3495,7 @@ export default function App() {
                         {p.deleted ? (
                           <button
                             onClick={() => restoreDriverAccount(name)}
-                            style={{ ...styles.btnGhost, borderColor: "#3DDC84", color: "#3DDC84", fontSize: 12, padding: "6px 10px" }}
+                            style={{ ...styles.btnGhost, borderColor: "#3BD07A", color: "#3BD07A", fontSize: 12, padding: "6px 10px" }}
                           >
                             Restaurer
                           </button>
@@ -3543,8 +3512,8 @@ export default function App() {
                               }}
                               style={{
                                 ...styles.btnGhost,
-                                borderColor: p.banned ? "#3DDC84" : "#E5484D",
-                                color: p.banned ? "#3DDC84" : "#E5484D",
+                                borderColor: p.banned ? "#3BD07A" : "#E5484D",
+                                color: p.banned ? "#3BD07A" : "#E5484D",
                                 fontSize: 12, padding: "6px 10px",
                               }}
                             >
@@ -3577,7 +3546,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 12 }}>
+            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 12 }}>
               Son téléphone et sa commune seront effacés, sa position retirée de la carte, et il ne pourra
               plus jamais se reconnecter tant que tu n'auras pas cliqué "Restaurer". Ses courses passées
               restent visibles dans l'historique.
@@ -3609,7 +3578,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "#9aa0ad", fontSize: 13, marginBottom: 12 }}>
+            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 12 }}>
               Ce chauffeur sera déconnecté immédiatement et ne pourra plus se reconnecter tant que tu ne le réactives pas.
             </p>
             <label style={styles.fieldLabel}>
@@ -3649,7 +3618,7 @@ export default function App() {
               </button>
             </div>
             {conversations.length === 0 ? (
-              <p style={{ color: "#9aa0ad", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
+              <p style={{ color: "#8A9099", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
                 Aucune conversation pour l'instant. Elles apparaissent ici dès qu'une course que tu as postée ou prise a un message.
               </p>
             ) : (
@@ -3660,17 +3629,17 @@ export default function App() {
                     onClick={() => { setChatRideId(c.rideId); setShowMessagesPanel(false); }}
                     style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
-                      background: "#14161C", border: "1px solid #2A2E38", borderRadius: 10,
+                      background: "#0F1114", border: "1px solid #23272E", borderRadius: 10,
                       padding: "12px 14px", textAlign: "left", cursor: "pointer",
                     }}
                   >
                     <div style={{ overflow: "hidden" }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {c.otherParty || "?"}
-                        {c.ride && <span style={{ color: "#9aa0ad", fontWeight: 400 }}> — {c.ride.depart} → {c.ride.arrivee}</span>}
+                        {c.ride && <span style={{ color: "#8A9099", fontWeight: 400 }}> — {c.ride.depart} → {c.ride.arrivee}</span>}
                       </div>
                       <div style={{
-                        color: "#9aa0ad", fontSize: 13, whiteSpace: "nowrap",
+                        color: "#8A9099", fontSize: 13, whiteSpace: "nowrap",
                         overflow: "hidden", textOverflow: "ellipsis", maxWidth: 260,
                       }}>
                         {c.last.senderName === driverName ? "Toi : " : ""}{c.last.text}
@@ -3701,7 +3670,7 @@ export default function App() {
             </div>
             <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, paddingRight: 4 }}>
               {chatMessages.length === 0 && (
-                <p style={{ color: "#6b7080", fontSize: 13, textAlign: "center", marginTop: 20 }}>
+                <p style={{ color: "#6E757E", fontSize: 13, textAlign: "center", marginTop: 20 }}>
                   Aucun message pour l'instant.
                 </p>
               )}
@@ -3713,8 +3682,8 @@ export default function App() {
                     style={{
                       alignSelf: isMe ? "flex-end" : "flex-start",
                       maxWidth: "80%",
-                      background: isMe ? "#F5A623" : "#2A2E38",
-                      color: isMe ? "#1C1F26" : "#F1EFEA",
+                      background: isMe ? "#FFB43A" : "#23272E",
+                      color: isMe ? "#1A1206" : "#F2F4F7",
                       padding: "8px 12px",
                       borderRadius: 10,
                       fontSize: 14,
@@ -3727,7 +3696,7 @@ export default function App() {
               })}
               <div ref={chatEndRef} />
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12, paddingTop: 12, borderTop: "1px solid #3a3f4c" }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, paddingTop: 12, borderTop: "1px solid #3A4048" }}>
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
@@ -3752,89 +3721,94 @@ export default function App() {
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "radial-gradient(ellipse 900px 500px at 10% -5%, rgba(245,166,35,0.08), transparent 55%), radial-gradient(ellipse 700px 500px at 100% 10%, rgba(61,220,132,0.04), transparent 50%), #14161C",
-    color: "#F1EFEA",
-    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    background: "#0F1114",
+    color: "#F2F4F7",
+    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     padding: "0 0 40px 0",
     position: "relative",
   },
-  gateCard: { maxWidth: 380, margin: "80px auto", background: "#1D2029", borderRadius: 14, padding: "32px 28px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid #2A2E38" },
-  beacon: { width: 14, height: 14, borderRadius: "50%", background: "#F5A623", margin: "0 auto 16px" },
+  gateCard: { maxWidth: 380, margin: "80px auto", background: "#191C21", borderRadius: 14, padding: "32px 28px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid #23272E" },
+  beacon: { width: 14, height: 14, borderRadius: "50%", background: "#FFB43A", margin: "0 auto 16px" },
   logoBadgeLarge: {
     position: "relative", width: 64, height: 64, borderRadius: 16,
-    background: "linear-gradient(135deg, #F5A623, #d98d1a)",
+    background: "linear-gradient(135deg, #FFB43A, #d98d1a)",
     display: "flex", alignItems: "center", justifyContent: "center",
     boxShadow: "0 4px 16px rgba(245,166,35,0.4)", margin: "0 auto 16px",
   },
   logoBeaconLarge: {
     position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%",
-    background: "#3DDC84", border: "3px solid #1C1F26", boxShadow: "0 0 10px 2px rgba(61,220,132,0.7)",
+    background: "#3BD07A", border: "3px solid #1A1206", boxShadow: "0 0 10px 2px rgba(61,220,132,0.7)",
   },
-  beaconSmall: { width: 10, height: 10, borderRadius: "50%", background: "#F5A623", boxShadow: "0 0 8px 2px rgba(245,166,35,0.6)" },
+  beaconSmall: { width: 10, height: 10, borderRadius: "50%", background: "#FFB43A", boxShadow: "0 0 8px 2px rgba(245,166,35,0.6)" },
   logoBadge: {
     position: "relative", width: 32, height: 32, borderRadius: 9,
-    background: "linear-gradient(135deg, #F5A623, #d98d1a)",
+    background: "linear-gradient(135deg, #FFB43A, #d98d1a)",
     display: "flex", alignItems: "center", justifyContent: "center",
     boxShadow: "0 2px 8px rgba(245,166,35,0.35)", flexShrink: 0,
   },
   logoBeacon: {
     position: "absolute", top: -3, right: -3, width: 9, height: 9, borderRadius: "50%",
-    background: "#3DDC84", border: "2px solid #1C1F26", boxShadow: "0 0 6px 1px rgba(61,220,132,0.7)",
+    background: "#3BD07A", border: "2px solid #1A1206", boxShadow: "0 0 6px 1px rgba(61,220,132,0.7)",
   },
-  gateTitle: { fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, letterSpacing: 0.5, fontWeight: 700, margin: 0 },
-  gateSub: { color: "#9aa0ad", fontSize: 14, marginTop: 10, lineHeight: 1.5 },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 12px", borderBottom: "1px solid #2A2E38", position: "sticky", top: 0, background: "#14161C", zIndex: 10, flexWrap: "wrap", gap: 10 },
-  headerRight: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
-  title: { fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, letterSpacing: 0.3, fontWeight: 700, margin: 0 },
-  driverTag: { fontSize: 13, background: "#2A2E38", padding: "6px 10px", borderRadius: 20, display: "flex", alignItems: "center" },
-  statsTag: { fontSize: 12, color: "#9aa0ad", background: "#2A2E38", padding: "4px 10px", borderRadius: 20 },
+  gateTitle: { fontFamily: "'Manrope', sans-serif", fontSize: 30, letterSpacing: 0.5, fontWeight: 700, margin: 0 },
+  gateSub: { color: "#8A9099", fontSize: 14, marginTop: 10, lineHeight: 1.5 },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: "1px solid #23272E", position: "sticky", top: 0, background: "#131519", zIndex: 10, flexWrap: "wrap", gap: 10 },
+  title: { fontFamily: "'Manrope', sans-serif", fontSize: 18, letterSpacing: "-0.01em", fontWeight: 800, margin: 0 },
+  headerSubtitle: { fontSize: 12, fontWeight: 500, color: "#8A9099" },
+  statusPill: {
+    display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 999,
+    border: "1px solid", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Manrope', sans-serif",
+  },
+  statusPillOn: { background: "rgba(59,208,122,0.10)", borderColor: "rgba(59,208,122,0.28)", color: "#3BD07A" },
+  statusPillOff: { background: "#22262C", borderColor: "#2A2F36", color: "#8A9099" },
+  statusDot: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0 },
   dateFilterRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  iconBtn: { background: "#2A2E38", border: "1px solid #3a3f4c", color: "#F1EFEA", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", alignItems: "center", fontSize: 12 },
+  iconBtn: { background: "#23272E", border: "1px solid #3A4048", color: "#F2F4F7", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", alignItems: "center", fontSize: 12 },
   tabs: { display: "flex", gap: 8, padding: "16px 24px", alignItems: "center", flexWrap: "wrap" },
-  tab: { background: "transparent", border: "1px solid #3a3f4c", color: "#9aa0ad", padding: "8px 14px", borderRadius: 20, cursor: "pointer", fontSize: 13 },
-  tabActive: { background: "#F5A623", color: "#1C1F26", borderColor: "#F5A623", fontWeight: 600 },
-  btnPrimary: { background: "#F5A623", color: "#1C1F26", border: "none", padding: "10px 16px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 14 },
-  btnGhost: { background: "transparent", border: "1px solid #3a3f4c", color: "#F1EFEA", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
-  btnClaim: { background: "#3DDC84", color: "#0e2318", border: "none", padding: "8px 14px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 13 },
-  formCard: { margin: "0 24px 20px", background: "#1D2029", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14 },
+  tab: { background: "transparent", border: "1px solid #3A4048", color: "#8A9099", padding: "8px 14px", borderRadius: 20, cursor: "pointer", fontSize: 13 },
+  tabActive: { background: "#FFB43A", color: "#1A1206", borderColor: "#FFB43A", fontWeight: 600 },
+  btnPrimary: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "10px 16px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 14 },
+  btnGhost: { background: "transparent", border: "1px solid #3A4048", color: "#F2F4F7", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
+  btnClaim: { background: "#3BD07A", color: "#0e2318", border: "none", padding: "8px 14px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 13 },
+  formCard: { margin: "0 24px 20px", background: "#191C21", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14 },
   formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
   typeChip: { border: "1.5px solid", background: "transparent", padding: "12px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700, minHeight: 48 },
-  input: { background: "#14161C", border: "1.5px solid #3a3f4c", color: "#F1EFEA", padding: "14px 14px", borderRadius: 10, fontSize: 16.5, outline: "none", minHeight: 50 },
-  checkboxRow: { display: "flex", alignItems: "center", gap: 10, fontSize: 14.5, color: "#c7cad1" },
-  fieldLabel: { display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, color: "#E4E6EB", fontWeight: 700 },
+  input: { background: "#191C21", border: "1.5px solid #23272E", color: "#F2F4F7", padding: "14px 14px", borderRadius: 10, fontSize: 16.5, outline: "none", minHeight: 50 },
+  checkboxRow: { display: "flex", alignItems: "center", gap: 10, fontSize: 14.5, color: "#B8BEC6" },
+  fieldLabel: { display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, color: "#E4E7EB", fontWeight: 700 },
   sectionLabel: {
-    fontFamily: "'Space Grotesk', sans-serif", fontSize: 11.5, fontWeight: 700,
-    color: "#6b7080", textTransform: "uppercase", letterSpacing: 0.6,
+    fontFamily: "'Manrope', sans-serif", fontSize: 11.5, fontWeight: 700,
+    color: "#6E757E", textTransform: "uppercase", letterSpacing: 0.6,
     marginTop: 18, marginBottom: 2,
   },
-  sectionDivider: { height: 1, background: "#2A2E38", margin: "18px 0 0" },
+  sectionDivider: { height: 1, background: "#23272E", margin: "18px 0 0" },
   categoryBtn: {
     display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
-    background: "#14161C", border: "1.5px solid #2A2E38", borderRadius: 12,
-    padding: "16px 16px", minHeight: 56, fontSize: 15.5, fontWeight: 700, color: "#F1EFEA",
+    background: "#0F1114", border: "1.5px solid #23272E", borderRadius: 12,
+    padding: "16px 16px", minHeight: 56, fontSize: 15.5, fontWeight: 700, color: "#F2F4F7",
     cursor: "pointer", textAlign: "left",
   },
   categoryBtnLeft: { display: "flex", alignItems: "center", gap: 12 },
   togglePill: {
     display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-    border: "1.5px solid #3a3f4c", background: "transparent", color: "#c7cad1",
+    border: "1.5px solid #3A4048", background: "transparent", color: "#B8BEC6",
     padding: "13px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 600,
     minHeight: 50, flex: 1,
   },
   collapsibleHeader: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
-    background: "transparent", border: "none", color: "#9aa0ad", cursor: "pointer",
+    background: "transparent", border: "none", color: "#8A9099", cursor: "pointer",
     fontSize: 14, fontWeight: 600, padding: "6px 2px", width: "100%",
   },
   swapBtn: {
     position: "absolute", right: -6, top: "50%", transform: "translateY(-50%)", zIndex: 5,
-    background: "#F5A623", color: "#1C1F26", border: "none", borderRadius: "50%",
+    background: "#FFB43A", color: "#1A1206", border: "none", borderRadius: "50%",
     width: 32, height: 32, cursor: "pointer", fontSize: 14, fontWeight: 700,
     display: "flex", alignItems: "center", justifyContent: "center",
   },
   tpmrBadge: {
-    fontSize: 10, fontWeight: 700, color: "#1C1F26", background: "#9aa0ad",
+    fontSize: 10, fontWeight: 700, color: "#1A1206", background: "#8A9099",
     padding: "2px 6px", borderRadius: 4, marginRight: 4,
   },
   suggestionBox: {
@@ -3842,8 +3816,8 @@ const styles = {
     top: "100%",
     left: 0,
     right: 0,
-    background: "#1D2029",
-    border: "1.5px solid #3a3f4c",
+    background: "#191C21",
+    border: "1.5px solid #3A4048",
     borderRadius: 10,
     marginTop: 6,
     maxHeight: 260,
@@ -3856,12 +3830,12 @@ const styles = {
     alignItems: "center",
     padding: "14px 14px",
     fontSize: 15,
-    color: "#F1EFEA",
+    color: "#F2F4F7",
     cursor: "pointer",
-    borderBottom: "1px solid #2A2E38",
+    borderBottom: "1px solid #23272E",
     minHeight: 48,
   },
-  photoPreview: { maxWidth: 160, maxHeight: 160, borderRadius: 8, display: "block", border: "1px solid #3a3f4c" },
+  photoPreview: { maxWidth: 160, maxHeight: 160, borderRadius: 8, display: "block", border: "1px solid #3A4048" },
   photoRemoveBtn: {
     position: "absolute", top: -8, right: -8, background: "#E5484D", color: "#fff",
     border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex",
@@ -3870,54 +3844,52 @@ const styles = {
   cardThumb: { width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8, marginBottom: 10, display: "block" },
   modalPhoto: { width: "100%", borderRadius: 10, marginTop: 12, display: "block" },
   board: { padding: "0 24px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 },
-  mapContainer: { width: "100%", height: "45vh", minHeight: 320, maxHeight: 460, borderRadius: 12, border: "1px solid #333844", overflow: "hidden", position: "relative", zIndex: 1, touchAction: "none" },
-  empty: { color: "#6b7080", padding: "40px 0", textAlign: "center" },
+  mapContainer: { width: "100%", height: "45vh", minHeight: 320, maxHeight: 460, borderRadius: 12, border: "1px solid #2A2F36", overflow: "hidden", position: "relative", zIndex: 1, touchAction: "none" },
+  empty: { color: "#6E757E", padding: "40px 0", textAlign: "center" },
   emptyState: { padding: "50px 24px", textAlign: "center", maxWidth: 380, margin: "0 auto" },
   emptyIcon: {
-    width: 72, height: 72, borderRadius: "50%", background: "#2A2E38",
+    width: 72, height: 72, borderRadius: "50%", background: "#23272E",
     display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px",
-    border: "1px solid #333844",
+    border: "1px solid #2A2F36",
   },
-  emptyTitle: { color: "#F1EFEA", fontSize: 16, fontWeight: 600, margin: "0 0 8px" },
-  emptySub: { color: "#6b7080", fontSize: 13, lineHeight: 1.5, margin: 0 },
-  card: { background: "#1D2029", borderRadius: 12, padding: "16px 16px 16px 18px", position: "relative", border: "1px solid #2A2E38" },
+  emptyTitle: { color: "#F2F4F7", fontSize: 16, fontWeight: 600, margin: "0 0 8px" },
+  emptySub: { color: "#6E757E", fontSize: 13, lineHeight: 1.5, margin: 0 },
+  card: { background: "#191C21", borderRadius: 12, padding: "16px 16px 16px 18px", position: "relative", border: "1px solid #23272E" },
   urgentBadge: { position: "absolute", top: -8, right: 12, background: "#E5484D", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center" },
   cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  typeTag: { fontFamily: "'Space Grotesk', sans-serif", fontSize: 11, fontWeight: 700, color: "#14161C", padding: "4px 8px", borderRadius: 6, display: "flex", alignItems: "center", letterSpacing: 0.3 },
+  typeTag: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: 6, display: "flex", alignItems: "center", letterSpacing: "0.10em", textTransform: "uppercase" },
   statusTag: { fontSize: 12, fontWeight: 600 },
   route: { display: "flex", alignItems: "center", gap: 6, fontSize: 14, marginBottom: 10, flexWrap: "wrap" },
-  metaRow: { display: "flex", gap: 14, fontSize: 12, color: "#9aa0ad", marginBottom: 8, flexWrap: "wrap" },
+  metaRow: { display: "flex", gap: 14, fontSize: 12, color: "#8A9099", marginBottom: 8, flexWrap: "wrap" },
   metaItem: { display: "flex", alignItems: "center", gap: 4 },
   tarifTag: {
-    display: "flex", alignItems: "center", fontSize: 17, fontWeight: 700,
-    fontFamily: "'JetBrains Mono', monospace", fontVariantNumeric: "tabular-nums",
-    color: "#F5A623", textShadow: "0 0 8px rgba(245,166,35,0.35)",
-    background: "rgba(245,166,35,0.08)",
-    padding: "3px 10px", borderRadius: 6,
+    display: "flex", alignItems: "center", fontSize: 20, fontWeight: 800,
+    fontFamily: "'Manrope', sans-serif", letterSpacing: "-0.02em",
+    fontVariantNumeric: "tabular-nums", color: "#F2F4F7",
   },
   contactBtn: {
-    flex: 1, textAlign: "center", background: "#2A2E38", border: "1px solid #3a3f4c",
-    color: "#F1EFEA", padding: "9px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+    flex: 1, textAlign: "center", background: "#23272E", border: "1px solid #3A4048",
+    color: "#F2F4F7", padding: "9px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
     textDecoration: "none",
   },
-  notes: { fontSize: 12, color: "#c7cad1", background: "#1C1F26", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
-  priorityBanner: { display: "flex", alignItems: "center", fontSize: 11, color: "#F5A623", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.3)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 },
-  pendingBanner: { fontSize: 12, color: "#F5A623", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.3)", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
-  cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #333844", paddingTop: 10 },
-  postedBy: { fontSize: 11, color: "#6b7080" },
-  hintBanner: { margin: "0 24px 16px", background: "#2A2E38", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#9aa0ad" },
-  earningsBanner: { margin: "0 24px 16px", background: "rgba(61,220,132,0.1)", border: "1px solid rgba(61,220,132,0.3)", padding: "10px 14px", borderRadius: 8, fontSize: 14, color: "#3DDC84" },
-  planningGap: { display: "flex", alignItems: "center", fontSize: 12, padding: "6px 12px", margin: "8px 0", border: "1px dashed #3a3f4c", borderRadius: 6 },
+  notes: { fontSize: 12, color: "#B8BEC6", background: "#22262C", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
+  priorityBanner: { display: "flex", alignItems: "center", fontSize: 11, color: "#FFB43A", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.3)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 },
+  pendingBanner: { fontSize: 12, color: "#FFB43A", background: "rgba(245,166,35,0.1)", border: "1px solid rgba(245,166,35,0.3)", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
+  cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #2A2F36", paddingTop: 10 },
+  postedBy: { fontSize: 11, color: "#6E757E" },
+  hintBanner: { margin: "0 24px 16px", background: "#23272E", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#8A9099" },
+  earningsBanner: { margin: "0 24px 16px", background: "rgba(61,220,132,0.1)", border: "1px solid rgba(61,220,132,0.3)", padding: "10px 14px", borderRadius: 8, fontSize: 14, color: "#3BD07A" },
+  planningGap: { display: "flex", alignItems: "center", fontSize: 12, padding: "6px 12px", margin: "8px 0", border: "1px dashed #3A4048", borderRadius: 6 },
   errorBanner: { margin: "0 24px 16px", background: "#E5484D", padding: "10px 14px", borderRadius: 8, display: "flex", justifyContent: "space-between", fontSize: 13 },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 100 },
-  modalCard: { background: "#2A2E38", borderRadius: 14, padding: 24, maxWidth: 440, width: "100%", maxHeight: "85vh", overflowY: "auto", overflowX: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" },
+  modalCard: { background: "#23272E", borderRadius: 14, padding: 24, maxWidth: 440, width: "100%", maxHeight: "85vh", overflowY: "auto", overflowX: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" },
   modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  modalTitle: { fontSize: 18, margin: "0 0 16px", color: "#F1EFEA" },
+  modalTitle: { fontSize: 18, margin: "0 0 16px", color: "#F2F4F7" },
   modalGrid: { display: "flex", flexDirection: "column", gap: 10 },
   navRow: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 },
   navBtn: {
     display: "flex", alignItems: "center", gap: 8,
-    background: "#14161C", border: "1.5px solid #3a3f4c", color: "#F1EFEA",
+    background: "#0F1114", border: "1.5px solid #3A4048", color: "#F2F4F7",
     padding: "9px 14px 9px 9px", borderRadius: 24, fontSize: 14, fontWeight: 700,
     textDecoration: "none", whiteSpace: "nowrap", flex: 1, justifyContent: "center",
   },
@@ -3929,10 +3901,10 @@ const styles = {
   navBtnWaze: { borderColor: "#05C8F7" },
   navBtnMaps: { borderColor: "#4285F4" },
   modalRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 14 },
-  modalActions: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid #3a3f4c" },
+  modalActions: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" },
   bottomNav: {
     position: "fixed", bottom: 0, left: 0, right: 0, height: 64,
-    background: "#1A1C24", borderTop: "1px solid #2A2E38",
+    background: "#1A1C24", borderTop: "1px solid #23272E",
     alignItems: "center", justifyContent: "space-around",
     zIndex: 90, paddingBottom: "env(safe-area-inset-bottom, 0px)",
   },
@@ -3949,14 +3921,14 @@ const styles = {
     border: "1.5px solid #1A1C24",
   },
   bottomNavFab: {
-    background: "#F5A623", border: "none", borderRadius: "50%",
+    background: "#FFB43A", border: "none", borderRadius: "50%",
     width: 52, height: 52, display: "flex", alignItems: "center", justifyContent: "center",
     cursor: "pointer", marginTop: -20, boxShadow: "0 4px 14px rgba(245,166,35,0.5)",
   },
   bottomNavFabSlot: { width: 58, flexShrink: 0 },
   bottomNavFabFloating: {
     position: "fixed", bottom: 34, left: "50%", transform: "translateX(-50%)",
-    background: "#F5A623", border: "3px solid #14161C", borderRadius: "50%",
+    background: "#FFB43A", border: "3px solid #0F1114", borderRadius: "50%",
     width: 58, height: 58, alignItems: "center", justifyContent: "center",
     cursor: "pointer", boxShadow: "0 4px 16px rgba(245,166,35,0.55)", zIndex: 91,
   },
@@ -3967,7 +3939,7 @@ const styles = {
   },
   priorityAlertCard: {
     width: "100%", maxWidth: 420, background: "#1A1C24",
-    border: "2px solid #F5A623", borderRadius: 18, padding: 18,
+    border: "2px solid #FFB43A", borderRadius: 18, padding: 18,
     boxShadow: "0 0 40px rgba(245,166,35,0.35)",
     maxHeight: "88vh", overflowY: "auto",
   },
@@ -3975,14 +3947,14 @@ const styles = {
     display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
   },
   priorityAlertPill: {
-    background: "#F5A623", color: "#14161C", fontWeight: 800,
+    background: "#FFB43A", color: "#1A1206", fontWeight: 800,
     fontSize: 12, letterSpacing: "0.04em", padding: "6px 10px", borderRadius: 999,
   },
   priorityAlertSub: {
-    color: "#9aa0ad", fontSize: 13, margin: "10px 0 14px",
+    color: "#8A9099", fontSize: 13, margin: "10px 0 14px",
   },
   priorityAlertBody: {
-    background: "#14161C", border: "1px solid #2A2E38",
+    background: "#0F1114", border: "1px solid #23272E",
     borderRadius: 12, padding: 14, marginBottom: 16,
   },
   priorityAlertRoute: {
@@ -3990,19 +3962,12 @@ const styles = {
   },
   priorityAlertMeta: {
     display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12,
-    fontSize: 13, color: "#9aa0ad", alignItems: "center",
+    fontSize: 13, color: "#8A9099", alignItems: "center",
   },
   priorityAlertActions: { display: "flex", gap: 10 },
   pullBanner: {
     position: "fixed", top: 0, left: 0, right: 0, zIndex: 200,
-    background: "#F5A623", color: "#1C1F26", textAlign: "center",
+    background: "#FFB43A", color: "#1A1206", textAlign: "center",
     padding: "10px 0", fontSize: 13, fontWeight: 700,
-  },
-  cornerStripes: {
-    position: "fixed", top: 0, right: 0, width: 220, height: 220,
-    backgroundImage: "repeating-linear-gradient(-45deg, rgba(245,166,35,0.05) 0px, rgba(245,166,35,0.05) 2px, transparent 2px, transparent 14px)",
-    pointerEvents: "none", zIndex: 0,
-    maskImage: "linear-gradient(225deg, #000 0%, transparent 70%)",
-    WebkitMaskImage: "linear-gradient(225deg, #000 0%, transparent 70%)",
   },
 };
