@@ -377,14 +377,63 @@ function cardLocality(address) {
   return parts[0];
 }
 
-// Simplifie l'adresse complète renvoyée par le service (numéro + rue, ville, code postal)
+// Simplifie l'adresse complète renvoyée par le service (numéro + rue, ville, code postal).
+// Si le résultat est un lieu nommé (hôpital, clinique, pharmacie...), son nom est utilisé
+// en tête plutôt que le nom de rue — bien plus utile pour repérer la bonne adresse.
 function shortAddress(s) {
   const a = s.address || {};
+  const poiName = s.namedetails?.name || a[s.class] || null;
   const street = [a.house_number, a.road || a.pedestrian || a.footway].filter(Boolean).join(" ");
   const locality = a.village || a.town || a.city || a.municipality || a.suburb || "";
   const postcode = a.postcode || "";
+  if (poiName) {
+    const parts = [poiName, locality].filter(Boolean);
+    return parts.length ? parts.join(", ") : s.display_name;
+  }
   const parts = [street, locality, postcode].filter(Boolean);
   return parts.length ? parts.join(", ") : s.display_name;
+}
+
+const MEDICAL_POI_TYPES = new Set(["hospital", "clinic", "doctors", "pharmacy", "nursing_home"]);
+function isMedicalPoi(s) {
+  return s.class === "amenity" && MEDICAL_POI_TYPES.has(s.type);
+}
+
+// Distance à vol d'oiseau entre la position du chauffeur et un résultat de recherche brut,
+// affichée dans la liste de suggestions pour départager rapidement plusieurs résultats homonymes.
+function suggestionDistanceLabel(here, s) {
+  if (!here) return null;
+  const d = distanceKm(here, { lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
+  if (d == null) return null;
+  return `${d < 10 ? d.toFixed(1) : Math.round(d)} km`;
+}
+
+// Adresses récemment sélectionnées (hôpitaux, cliniques habituels...) — stockées en local
+// pour être proposées instantanément dès le focus du champ, avant même de taper.
+const RECENT_ADDRESSES_KEY = "rp-recent-addresses";
+const MAX_RECENT_ADDRESSES = 6;
+
+function loadRecentAddresses() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_ADDRESSES_KEY) || "[]");
+    return Array.isArray(raw) ? raw : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveRecentAddress(entry) {
+  const current = loadRecentAddresses();
+  const next = [
+    { ...entry, recent: true },
+    ...current.filter((r) => r.address !== entry.address),
+  ].slice(0, MAX_RECENT_ADDRESSES);
+  try {
+    localStorage.setItem(RECENT_ADDRESSES_KEY, JSON.stringify(next));
+  } catch (e) {
+    // Stockage indisponible (navigation privée...) : tant pis, pas bloquant.
+  }
+  return next;
 }
 
 function distanceKm(a, b) {
@@ -719,7 +768,10 @@ export default function App() {
   const [arriveeSuggestions, setArriveeSuggestions] = useState([]);
   const [searchingAddress, setSearchingAddress] = useState(false);
   const [activeField, setActiveField] = useState(null);
+  const [recentAddresses, setRecentAddresses] = useState(loadRecentAddresses);
+  const [suggestionActiveIndex, setSuggestionActiveIndex] = useState(-1);
   const debounceRef = useRef(null);
+  const debounceRefArrivee = useRef(null);
   const photoInputRef = useRef(null);
   const documentInputRef = useRef(null);
   const mapContainerRef = useRef(null);
@@ -761,8 +813,8 @@ export default function App() {
   // remontent en priorité, ce qui accélère et fiabilise la recherche au quotidien.
   const ALSACE_VIEWBOX = "6.8,49.1,8.3,47.4"; // gauche,haut,droite,bas
 
-  const searchAddress = (query, setSuggestions) => {
-    clearTimeout(debounceRef.current);
+  const searchAddress = (query, setSuggestions, ref = debounceRef) => {
+    clearTimeout(ref.current);
     if (query.trim().length < 3) {
       setSuggestions([]);
       return;
@@ -773,11 +825,13 @@ export default function App() {
     const viewbox = here
       ? `${here.lng - 0.6},${here.lat + 0.6},${here.lng + 0.6},${here.lat - 0.6}`
       : ALSACE_VIEWBOX;
-    debounceRef.current = setTimeout(async () => {
+    ref.current = setTimeout(async () => {
       setSearchingAddress(true);
       try {
+        // namedetails=1 fait remonter le nom des lieux (hôpitaux, cliniques, pharmacies...)
+        // en plus de l'adresse brute ; dedupe=1 évite les doublons du même lieu.
         const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=fr&limit=7&viewbox=${viewbox}&bounded=0&q=${encodeURIComponent(query)}`
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&namedetails=1&dedupe=1&countrycodes=fr&limit=8&viewbox=${viewbox}&bounded=0&q=${encodeURIComponent(query)}`
         );
         const data = await res.json();
         // Tri par proximité réelle avec ta position, quand elle est connue —
@@ -796,6 +850,50 @@ export default function App() {
         setSearchingAddress(false);
       }
     }, 200);
+  };
+
+  // Source de suggestions active pour un champ : les adresses récentes tant que la saisie
+  // est trop courte pour interroger le service, sinon les résultats de recherche en direct.
+  const suggestionListFor = (field) => {
+    const value = field === "depart" ? form.depart : form.arrivee;
+    if (value.trim().length < 3) return recentAddresses;
+    return field === "depart" ? departSuggestions : arriveeSuggestions;
+  };
+
+  const pickAddressSuggestion = (field, item) => {
+    const address = item.recent ? item.address : shortAddress(item);
+    const lat = item.recent ? item.lat : parseFloat(item.lat);
+    const lng = item.recent ? item.lng : parseFloat(item.lon);
+    if (field === "depart") {
+      setForm({ ...form, depart: address, departLat: lat, departLng: lng });
+      setDepartSuggestions([]);
+    } else {
+      setForm({ ...form, arrivee: address, arriveeLat: lat, arriveeLng: lng });
+      setArriveeSuggestions([]);
+    }
+    setActiveField(null);
+    setSuggestionActiveIndex(-1);
+    setRecentAddresses(saveRecentAddress({ address, lat, lng }));
+  };
+
+  // Navigation clavier (↑/↓/Entrée/Échap) dans la liste de suggestions, pour choisir
+  // une adresse sans quitter le clavier — plus rapide que de viser au doigt sur mobile.
+  const handleAddressKeyDown = (field, e) => {
+    if (activeField !== field) return;
+    const list = suggestionListFor(field);
+    if (list.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSuggestionActiveIndex((i) => Math.min(i + 1, list.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSuggestionActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter" && suggestionActiveIndex >= 0) {
+      e.preventDefault();
+      pickAddressSuggestion(field, list[suggestionActiveIndex]);
+    } else if (e.key === "Escape") {
+      setActiveField(null);
+    }
   };
 
   useEffect(() => {
@@ -2054,14 +2152,17 @@ export default function App() {
               <div style={{ position: "relative" }}>
                 <input
                   style={styles.input}
-                  placeholder="Ex: 5 rue du Rhin, Bischwiller"
+                  placeholder="Ex: 5 rue du Rhin, Bischwiller — ou un nom de lieu"
                   value={form.depart}
                   onChange={(e) => {
                     setForm({ ...form, depart: e.target.value });
                     setActiveField("depart");
+                    setSuggestionActiveIndex(-1);
                     searchAddress(e.target.value, setDepartSuggestions);
                   }}
-                  onFocus={() => setActiveField("depart")}
+                  onFocus={() => { setActiveField("depart"); setSuggestionActiveIndex(-1); }}
+                  onBlur={() => setTimeout(() => setActiveField((f) => (f === "depart" ? null : f)), 120)}
+                  onKeyDown={(e) => handleAddressKeyDown("depart", e)}
                   required
                 />
                 {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
@@ -2069,22 +2170,31 @@ export default function App() {
                     <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default" }}>Recherche…</div>
                   </div>
                 )}
-                {activeField === "depart" && !searchingAddress && departSuggestions.length > 0 && (
+                {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
                   <div style={styles.suggestionBox}>
-                    {departSuggestions.map((s) => (
-                      <div
-                        key={s.place_id}
-                        style={styles.suggestionItem}
-                        onClick={() => {
-                          setForm({ ...form, depart: shortAddress(s), departLat: parseFloat(s.lat), departLng: parseFloat(s.lon) });
-                          setDepartSuggestions([]);
-                          setActiveField(null);
-                        }}
-                      >
-                        <MapPin size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                        {shortAddress(s)}
+                    {form.depart.trim().length < 3 && (
+                      <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #2A2E38" }}>
+                        Adresses récentes
                       </div>
-                    ))}
+                    )}
+                    {suggestionListFor("depart").map((s, i) => {
+                      const isRecent = !!s.recent;
+                      const label = isRecent ? s.address : shortAddress(s);
+                      const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
+                      const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
+                      return (
+                        <div
+                          key={isRecent ? `recent-${s.address}` : s.place_id}
+                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#2A2E38" : undefined }}
+                          onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
+                          onMouseEnter={() => setSuggestionActiveIndex(i)}
+                        >
+                          <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+                          <span style={{ flex: 1 }}>{label}</span>
+                          {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2099,9 +2209,12 @@ export default function App() {
                   onChange={(e) => {
                     setForm({ ...form, arrivee: e.target.value });
                     setActiveField("arrivee");
-                    searchAddress(e.target.value, setArriveeSuggestions);
+                    setSuggestionActiveIndex(-1);
+                    searchAddress(e.target.value, setArriveeSuggestions, debounceRefArrivee);
                   }}
-                  onFocus={() => setActiveField("arrivee")}
+                  onFocus={() => { setActiveField("arrivee"); setSuggestionActiveIndex(-1); }}
+                  onBlur={() => setTimeout(() => setActiveField((f) => (f === "arrivee" ? null : f)), 120)}
+                  onKeyDown={(e) => handleAddressKeyDown("arrivee", e)}
                   required
                 />
                 {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
@@ -2109,22 +2222,31 @@ export default function App() {
                     <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default" }}>Recherche…</div>
                   </div>
                 )}
-                {activeField === "arrivee" && !searchingAddress && arriveeSuggestions.length > 0 && (
+                {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
                   <div style={styles.suggestionBox}>
-                    {arriveeSuggestions.map((s) => (
-                      <div
-                        key={s.place_id}
-                        style={styles.suggestionItem}
-                        onClick={() => {
-                          setForm({ ...form, arrivee: shortAddress(s), arriveeLat: parseFloat(s.lat), arriveeLng: parseFloat(s.lon) });
-                          setArriveeSuggestions([]);
-                          setActiveField(null);
-                        }}
-                      >
-                        <MapPin size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                        {shortAddress(s)}
+                    {form.arrivee.trim().length < 3 && (
+                      <div style={{ ...styles.suggestionItem, color: "#6b7080", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #2A2E38" }}>
+                        Adresses récentes
                       </div>
-                    ))}
+                    )}
+                    {suggestionListFor("arrivee").map((s, i) => {
+                      const isRecent = !!s.recent;
+                      const label = isRecent ? s.address : shortAddress(s);
+                      const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
+                      const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
+                      return (
+                        <div
+                          key={isRecent ? `recent-${s.address}` : s.place_id}
+                          style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#2A2E38" : undefined }}
+                          onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
+                          onMouseEnter={() => setSuggestionActiveIndex(i)}
+                        >
+                          <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+                          <span style={{ flex: 1 }}>{label}</span>
+                          {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
