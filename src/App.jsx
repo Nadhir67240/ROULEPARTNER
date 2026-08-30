@@ -116,8 +116,12 @@ const emptyForm = {
   trajet: "aller",
   departLat: null,
   departLng: null,
+  departCity: "",
+  departDept: "",
   arriveeLat: null,
   arriveeLng: null,
+  arriveeCity: "",
+  arriveeDept: "",
   tarif: "",
   urgent: false,
   tpmr: false,
@@ -667,6 +671,42 @@ function autoDetectNightWeekend(heureStr) {
   return isNight || isWeekend;
 }
 
+// Extrait la commune et le département d'un résultat de recherche d'adresse (Nominatim ou BAN,
+// mêmes clés depuis banToAddressResult) — utilisé pour détecter automatiquement le forfait
+// "grande ville" de la convention taxi conventionné.
+function addressCityDept(item) {
+  const a = item.address || {};
+  const city = a.village || a.town || a.city || a.municipality || a.suburb || "";
+  const postcode = a.postcode || "";
+  return { city, dept: postcode ? postcode.slice(0, 2) : "" };
+}
+
+// Villes et départements ouvrant droit au forfait "grande ville" (+15 €) — arrêté du
+// 29 juillet 2025 portant approbation de la convention-cadre nationale taxi/Assurance Maladie.
+// La CPAM publie aussi une liste d'établissements "limitrophes" à ces communes qui en
+// bénéficient par exception : cette détection automatique ne les couvre pas, la case reste
+// donc modifiable à la main pour ces cas particuliers.
+const GRANDE_VILLE_CITIES = new Set([
+  "marseille", "paris", "nice", "toulouse", "lyon", "strasbourg",
+  "montpellier", "rennes", "bordeaux", "lille", "grenoble", "nantes",
+]);
+const GRANDE_VILLE_DEPTS = new Set(["92", "93", "94"]);
+
+function normalizeCityName(s) {
+  return (s || "").toLowerCase().trim();
+}
+
+function isGrandeVilleZone(city, dept) {
+  if (dept && GRANDE_VILLE_DEPTS.has(dept)) return true;
+  const norm = normalizeCityName(city);
+  if (!norm) return false;
+  // Gère les arrondissements ("Paris 15e", "Lyon 3e"...) en plus du nom seul.
+  for (const c of GRANDE_VILLE_CITIES) {
+    if (norm === c || norm.startsWith(c + " ") || norm.startsWith(c + "-")) return true;
+  }
+  return false;
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -760,7 +800,6 @@ export default function App() {
     localStorage.setItem("radius-filter", value);
   };
   const [showForm, setShowForm] = useState(false);
-  const [showTarifOptions, setShowTarifOptions] = useState(false);
   const [showMoreDetails, setShowMoreDetails] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
@@ -987,16 +1026,19 @@ export default function App() {
     const address = item.recent ? item.address : shortAddress(item);
     const lat = item.recent ? item.lat : parseFloat(item.lat);
     const lng = item.recent ? item.lng : parseFloat(item.lon);
+    // Commune/département déjà connus pour un choix récent, sinon extraits du résultat de
+    // recherche — servent à détecter automatiquement le forfait "grande ville" (taxi conventionné).
+    const { city, dept } = item.recent ? { city: item.city || "", dept: item.dept || "" } : addressCityDept(item);
     if (field === "depart") {
-      setForm({ ...form, depart: address, departLat: lat, departLng: lng });
+      setForm({ ...form, depart: address, departLat: lat, departLng: lng, departCity: city, departDept: dept });
       setDepartSuggestions([]);
     } else {
-      setForm({ ...form, arrivee: address, arriveeLat: lat, arriveeLng: lng });
+      setForm({ ...form, arrivee: address, arriveeLat: lat, arriveeLng: lng, arriveeCity: city, arriveeDept: dept });
       setArriveeSuggestions([]);
     }
     setActiveField(null);
     setSuggestionActiveIndex(-1);
-    setRecentAddresses(saveRecentAddress({ address, lat, lng }));
+    setRecentAddresses(saveRecentAddress({ address, lat, lng, city, dept }));
   };
 
   // Navigation clavier (↑/↓/Entrée/Échap) dans la liste de suggestions, pour choisir
@@ -1361,8 +1403,12 @@ export default function App() {
       arrivee: f.depart,
       departLat: f.arriveeLat,
       departLng: f.arriveeLng,
+      departCity: f.arriveeCity,
+      departDept: f.arriveeDept,
       arriveeLat: f.departLat,
       arriveeLng: f.departLng,
+      arriveeCity: f.departCity,
+      arriveeDept: f.departDept,
     }));
   };
 
@@ -1377,6 +1423,25 @@ export default function App() {
     setForm((f) => (f.majorationNuitWeekend === auto ? f : { ...f, majorationNuitWeekend: auto }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.heure, form.type]);
+
+  // Coche/décoche automatiquement le forfait "grande ville" dès que le départ ou l'arrivée
+  // change, selon la liste officielle (arrêté du 29 juillet 2025). Ne couvre pas les
+  // établissements limitrophes ajoutés par exception par la CPAM — le chauffeur garde la main
+  // pour ces cas particuliers.
+  useEffect(() => {
+    if (form.type !== "taxi") return;
+    const orig = editOriginalTarifInputs.current;
+    if (
+      orig &&
+      orig.departCity === form.departCity && orig.departDept === form.departDept &&
+      orig.arriveeCity === form.arriveeCity && orig.arriveeDept === form.arriveeDept
+    ) {
+      return; // adresses inchangées depuis l'ouverture de la modification
+    }
+    const auto = isGrandeVilleZone(form.departCity, form.departDept) || isGrandeVilleZone(form.arriveeCity, form.arriveeDept);
+    setForm((f) => (f.grandeVille === auto ? f : { ...f, grandeVille: auto }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.departCity, form.departDept, form.arriveeCity, form.arriveeDept, form.type]);
 
   // Recalcule automatiquement le tarif "Taxi conventionné" dès que la distance,
   // le trajet ou les majorations changent — plus besoin de cliquer sur un bouton.
@@ -1477,13 +1542,15 @@ export default function App() {
   const startEdit = (r) => {
     editOriginalTarifInputs.current = {
       departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
+      departCity: r.departCity || "", departDept: r.departDept || "", arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       trajet: r.trajet, grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, tpmr: r.tpmr || false, heure: r.heure,
     };
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
       heure: r.heure, date: r.date || todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: r.urgent, tpmr: r.tpmr || false, notes: r.notes,
-      departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
+      departLat: r.departLat, departLng: r.departLng, departCity: r.departCity || "", departDept: r.departDept || "",
+      arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
       photo: r.photo || null, document: r.document || null, documentName: r.documentName || "",
@@ -1498,7 +1565,8 @@ export default function App() {
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
       heure: "", date: todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: false, tpmr: r.tpmr || false, notes: r.notes,
-      departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
+      departLat: r.departLat, departLng: r.departLng, departCity: r.departCity || "", departDept: r.departDept || "",
+      arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
       photo: r.photo || null, document: r.document || null, documentName: r.documentName || "",
@@ -2458,28 +2526,16 @@ export default function App() {
                     onChange={(e) => setForm({ ...form, majorationNuitWeekend: e.target.checked })} />
                   Nuit/dimanche/férié (+50 %) — détecté automatiquement
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowTarifOptions(!showTarifOptions)}
-                  style={styles.collapsibleHeader}
-                >
-                  Plus d'options de tarif
-                  {showTarifOptions ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                </button>
-                {showTarifOptions && (
-                  <>
-                    <label style={styles.checkboxRow} title="Marseille, Paris, Nice, Toulouse, Lyon, Strasbourg, Montpellier, Rennes, Bordeaux, Lille, Grenoble, Nantes, ou départements 92/93/94">
-                      <input type="checkbox" checked={form.grandeVille}
-                        onChange={(e) => setForm({ ...form, grandeVille: e.target.checked })} />
-                      Forfait grande ville (+15 €)
-                    </label>
-                    <label style={styles.checkboxRow} title="Hospitalisation, chimio, radiothérapie, dialyse... dont l'aller ou le retour se fait à vide">
-                      <input type="checkbox" checked={form.retourAVide}
-                        onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
-                      Retour à vide (hospitalisation/dialyse)
-                    </label>
-                  </>
-                )}
+                <label style={styles.checkboxRow} title="Marseille, Paris, Nice, Toulouse, Lyon, Strasbourg, Montpellier, Rennes, Bordeaux, Lille, Grenoble, Nantes, ou départements 92/93/94 — coche-la toi-même pour un établissement limitrophe non détecté">
+                  <input type="checkbox" checked={form.grandeVille}
+                    onChange={(e) => setForm({ ...form, grandeVille: e.target.checked })} />
+                  Forfait grande ville (+15 €) — détecté automatiquement
+                </label>
+                <label style={styles.checkboxRow} title="Hospitalisation, chimio, radiothérapie, dialyse... dont l'aller ou le retour se fait à vide">
+                  <input type="checkbox" checked={form.retourAVide}
+                    onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
+                  Retour à vide (hospitalisation/dialyse)
+                </label>
               </>
             )}
             <div style={styles.formLabel}>
