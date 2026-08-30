@@ -896,6 +896,14 @@ export default function App() {
   const mapMarkersRef = useRef({});
   const mapMarkerStatusRef = useRef({}); // name -> "busy"/"free" déjà affiché, pour éviter de recréer l'icône inutilement
   const [editingId, setEditingId] = useState(null);
+  // À l'ouverture d'une course existante en modification, le formulaire se remplit avec ses
+  // valeurs déjà enregistrées (adresses, majorations...) — ce remplissage déclenche les mêmes
+  // effets que si le chauffeur les avait modifiées, et recalculerait donc le tarif pour rien
+  // (ou pire, écraserait un tarif corrigé à la main). On saute ce tout premier recalcul, mais
+  // pas les suivants : si le chauffeur change ensuite l'adresse, le trajet ou une majoration,
+  // le tarif doit bien se remettre à jour.
+  const skipNextTarifRecalc = useRef(false);
+  const skipNextMajorationAuto = useRef(false);
   const [plannedIds, setPlannedIds] = useState(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem("planned-rides") || "[]"));
@@ -1363,7 +1371,11 @@ export default function App() {
   // selon la règle de la convention. Le chauffeur peut toujours corriger à la main
   // ensuite (par exemple pour un jour férié, qu'on ne peut pas détecter tout seul).
   useEffect(() => {
-    if (form.type !== "taxi" || editingId) return;
+    if (form.type !== "taxi") return;
+    if (skipNextMajorationAuto.current) {
+      skipNextMajorationAuto.current = false;
+      return;
+    }
     const auto = autoDetectNightWeekend(form.heure);
     setForm((f) => (f.majorationNuitWeekend === auto ? f : { ...f, majorationNuitWeekend: auto }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1375,7 +1387,11 @@ export default function App() {
   // si le service externe ne répond pas.
   const [calculatingTarif, setCalculatingTarif] = useState(false);
   useEffect(() => {
-    if (form.type !== "taxi" || editingId) return; // pas de recalcul auto en mode modification (on ne veut pas écraser un tarif déjà facturé)
+    if (form.type !== "taxi") return;
+    if (skipNextTarifRecalc.current) {
+      skipNextTarifRecalc.current = false;
+      return;
+    }
     const depart = { lat: form.departLat, lng: form.departLng };
     const arrivee = { lat: form.arriveeLat, lng: form.arriveeLng };
     if (depart.lat == null || arrivee.lat == null) return;
@@ -1455,6 +1471,8 @@ export default function App() {
   };
 
   const startEdit = (r) => {
+    skipNextTarifRecalc.current = true;
+    skipNextMajorationAuto.current = true;
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
       heure: r.heure, date: r.date || todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: r.urgent, tpmr: r.tpmr || false, notes: r.notes,
