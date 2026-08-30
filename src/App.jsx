@@ -5,7 +5,7 @@ import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
-  FileText, Flag, Settings, Building2, Shield, Send, Euro,
+  FileText, Settings, Building2, Shield, Send, Euro,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -3033,37 +3033,26 @@ export default function App() {
                 </div>
               )}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                  <span style={{ fontWeight: 700, fontSize: 17, color: "#F2F4F7" }}>{r.depart}</span>
+              <div style={{ background: "#191C21", border: "1px solid #23272E", borderRadius: 14, marginBottom: 18, overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "13px 14px", borderBottom: "1px solid #23272E" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: 15.5, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.depart}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <a href={wazeUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#05C8F7" }} aria-label="Waze vers le départ" title="Waze">W</a>
+                    <a href={googleMapsUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#4285F4" }} aria-label="Maps vers le départ" title="Maps">M</a>
+                  </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
-                  <span style={{ fontWeight: 600, fontSize: 17, color: "#B8BEC6" }}>{r.arrivee}</span>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}><Navigation size={12} /> Se guider vers le départ</span>
-                <div style={styles.navRow}>
-                  <a href={wazeUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnWaze }}>
-                    <span style={{ ...styles.navBtnDot, background: "#05C8F7" }}>W</span> Waze
-                  </a>
-                  <a href={googleMapsUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnMaps }}>
-                    <span style={{ ...styles.navBtnDot, background: "#4285F4" }}>M</span> Maps
-                  </a>
-                </div>
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <span style={{ fontSize: 12, color: "#8A9099", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}><Flag size={12} /> Se guider vers l'arrivée</span>
-                <div style={styles.navRow}>
-                  <a href={wazeUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnWaze }}>
-                    <span style={{ ...styles.navBtnDot, background: "#05C8F7" }}>W</span> Waze
-                  </a>
-                  <a href={googleMapsUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navBtn, ...styles.navBtnMaps }}>
-                    <span style={{ ...styles.navBtnDot, background: "#4285F4" }}>M</span> Maps
-                  </a>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "13px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600, fontSize: 15.5, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.arrivee}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <a href={wazeUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#05C8F7" }} aria-label="Waze vers l'arrivée" title="Waze">W</a>
+                    <a href={googleMapsUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#4285F4" }} aria-label="Maps vers l'arrivée" title="Maps">M</a>
+                  </div>
                 </div>
               </div>
 
@@ -4070,20 +4059,11 @@ const styles = {
   modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   modalTitle: { fontSize: 18, margin: "0 0 16px", color: "#F2F4F7" },
   modalGrid: { display: "flex", flexDirection: "column", gap: 10 },
-  navRow: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  navBtn: {
-    display: "flex", alignItems: "center", gap: 8,
-    background: "#0F1114", border: "1.5px solid #3A4048", color: "#F2F4F7",
-    padding: "9px 14px 9px 9px", borderRadius: 24, fontSize: 14, fontWeight: 700,
-    textDecoration: "none", whiteSpace: "nowrap", flex: 1, justifyContent: "center",
-  },
-  navBtnDot: {
+  navIconBtn: {
     display: "flex", alignItems: "center", justifyContent: "center",
-    width: 24, height: 24, borderRadius: "50%", fontSize: 12, fontWeight: 800,
-    color: "#fff", flexShrink: 0,
+    width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+    color: "#fff", fontSize: 13, fontWeight: 800, textDecoration: "none",
   },
-  navBtnWaze: { borderColor: "#05C8F7" },
-  navBtnMaps: { borderColor: "#4285F4" },
   modalRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 14 },
   modalActions: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" },
   bottomNav: {
