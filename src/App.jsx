@@ -12,7 +12,7 @@ import {
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
   setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken,
-  watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser,
+  watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
 } from "./firebase";
 
 const TYPES = [
@@ -514,6 +514,7 @@ export default function App() {
   const [authCommune, setAuthCommune] = useState("");
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const driverName = user?.displayName || "";
   const [rides, setRides] = useState([]);
   const [positions, setPositions] = useState({});
@@ -847,6 +848,34 @@ export default function App() {
     } catch (err) {
       setAuthError("Email ou mot de passe incorrect.");
     }
+    setAuthBusy(false);
+  };
+
+  const handleForgotPassword = async () => {
+    setAuthError("");
+    setResetSent(false);
+    if (!authEmail.trim()) {
+      setAuthError("Indique ton email pour recevoir le lien de réinitialisation.");
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      await requestPasswordReset(authEmail.trim());
+    } catch (err) {
+      // On ne distingue pas "compte inexistant" des autres cas dans le message
+      // affiché, pour ne pas révéler si un email est associé à un compte.
+      if (err.code === "auth/invalid-email") {
+        setAuthError("Adresse email invalide.");
+        setAuthBusy(false);
+        return;
+      }
+      if (err.code !== "auth/user-not-found") {
+        setAuthError("Échec de l'envoi. Réessaie plus tard.");
+        setAuthBusy(false);
+        return;
+      }
+    }
+    setResetSent(true);
     setAuthBusy(false);
   };
 
@@ -1579,14 +1608,14 @@ export default function App() {
           <div style={{ display: "flex", gap: 8, margin: "20px 0 4px" }}>
             <button
               type="button"
-              onClick={() => { setAuthMode("login"); setAuthError(""); }}
+              onClick={() => { setAuthMode("login"); setAuthError(""); setResetSent(false); }}
               style={{ ...styles.tab, flex: 1, ...(authMode === "login" ? styles.tabActive : {}) }}
             >
               Connexion
             </button>
             <button
               type="button"
-              onClick={() => { setAuthMode("signup"); setAuthError(""); }}
+              onClick={() => { setAuthMode("signup"); setAuthError(""); setResetSent(false); }}
               style={{ ...styles.tab, flex: 1, ...(authMode === "signup" ? styles.tabActive : {}) }}
             >
               Créer un compte
@@ -1640,6 +1669,21 @@ export default function App() {
               required
               autoComplete={authMode === "signup" ? "new-password" : "current-password"}
             />
+            {authMode === "login" && (
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={authBusy}
+                style={{ background: "none", border: "none", color: "#9aa0ad", fontSize: 12.5, textAlign: "right", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+              >
+                Mot de passe oublié ?
+              </button>
+            )}
+            {resetSent && (
+              <span style={{ color: "#4CAF77", fontSize: 13 }}>
+                Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé.
+              </span>
+            )}
             {authError && <span style={{ color: "#E5484D", fontSize: 13 }}>{authError}</span>}
             <button type="submit" style={styles.btnPrimary} disabled={authBusy}>
               {authBusy ? "…" : authMode === "signup" ? "Créer mon compte" : "Se connecter"}
