@@ -76,6 +76,9 @@ async function tokensFor(driverNames) {
     driverNames.map(async (name) => {
       const doc = await db.collection("fcmTokens").doc(name).get();
       const token = doc.exists ? doc.data().token : null;
+      // Log temporaire pour diagnostiquer les push qui n'arrivent jamais : permet de
+      // voir si le token existe côté serveur avant même d'essayer l'envoi FCM.
+      console.log(`tokensFor: "${name}" -> doc exists=${doc.exists}, token=${token ? "present" : "absent"}`);
       if (token) out.push({ name, token });
     })
   );
@@ -101,7 +104,10 @@ async function allTokensExcept(excludedNames) {
 // (appli désinstallée, navigateur réinitialisé...), sinon la collection
 // se remplit de jetons morts au fil des mois.
 async function sendTo(entries, payload) {
-  if (entries.length === 0) return;
+  if (entries.length === 0) {
+    console.log("sendTo: no token entries, nothing to send.");
+    return;
+  }
   const res = await admin.messaging().sendEachForMulticast({
     tokens: entries.map((e) => e.token),
     notification: payload.notification,
@@ -122,9 +128,15 @@ async function sendTo(entries, payload) {
     },
   });
 
+  console.log(
+    `sendTo: ${res.successCount} succeeded, ${res.failureCount} failed, for [${entries.map((e) => e.name).join(", ")}]`
+  );
   const stale = [];
   res.responses.forEach((r, i) => {
     const code = r.error && r.error.code;
+    if (code) {
+      console.log(`sendTo: failure for "${entries[i].name}": ${code} — ${r.error.message}`);
+    }
     if (
       code === "messaging/registration-token-not-registered" ||
       code === "messaging/invalid-registration-token"
@@ -222,13 +234,31 @@ exports.notifyRideStatusChange = onDocumentUpdated(
     const before = event.data.before.data();
     const after = event.data.after.data();
     if (!after || !before || before.status === after.status) return;
-    if (!["en_cours", "terminee"].includes(after.status)) return;
+
+    // "disponible" ne doit déclencher une notif que dans le cas précis d'un relâchement
+    // (prise -> disponible) : un refus de demande (en_attente -> disponible) est déjà
+    // l'action du posteur lui-même, inutile de le notifier de son propre geste.
+    const isRelease = before.status === "prise" && after.status === "disponible";
+    if (!isRelease && !["en_attente", "en_cours", "terminee"].includes(after.status)) return;
+
+    const titles = {
+      disponible: "😬 Un chauffeur a relâché ta course",
+      en_attente: "🙋 Un chauffeur veut prendre ta course",
+      en_cours: "🚗 Ta course a démarré",
+      terminee: "✅ Ta course est terminée",
+    };
+    const bodies = {
+      disponible: `${before.takenBy || "?"} — ${after.depart} → ${after.arrivee}`,
+      en_attente: `${after.pendingBy} — ${after.depart} → ${after.arrivee}`,
+      en_cours: `${after.depart} → ${after.arrivee} — prise par ${after.takenBy || "?"}`,
+      terminee: `${after.depart} → ${after.arrivee} — prise par ${after.takenBy || "?"}`,
+    };
 
     const entries = await tokensFor([after.postedBy]);
     await sendTo(entries, {
       notification: {
-        title: after.status === "en_cours" ? "🚗 Ta course a démarré" : "✅ Ta course est terminée",
-        body: `${after.depart} → ${after.arrivee} — prise par ${after.takenBy || "?"}`,
+        title: titles[after.status],
+        body: bodies[after.status],
       },
       data: {
         rideId: event.params.rideId,

@@ -6,7 +6,7 @@ import {
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
   FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil, CalendarPlus, CalendarCheck,
-  Users,
+  Users, LayoutDashboard, LifeBuoy, Mail,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -118,6 +118,7 @@ const emptyForm = {
   depart: "",
   arrivee: "",
   heure: "",
+  heureRetour: "",
   date: todayKey(0),
   trajet: "aller",
   departLat: null,
@@ -307,6 +308,34 @@ function notifyPriorityRide(ride, shared) {
       icon: "/icon-192.png",
       tag: ride.id,
       requireInteraction: true,
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
+function notifyClaimRequest(ride) {
+  playAlertSound(false);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification("🙋 Un chauffeur veut prendre ta course", {
+      body: `${ride.pendingBy} — ${ride.depart} → ${ride.arrivee}`,
+      icon: "/icon-192.png",
+      tag: `${ride.id}-claim`,
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
+function notifyRideReleased(ride, takenByName) {
+  playAlertSound(false);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification("😬 Un chauffeur a relâché ta course", {
+      body: `${takenByName} — ${ride.depart} → ${ride.arrivee}`,
+      icon: "/icon-192.png",
+      tag: `${ride.id}-released`,
     });
   } catch (e) {
     // ignore
@@ -839,7 +868,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [, setTick] = useState(0);
   const [selectedRide, setSelectedRide] = useState(null);
-  const [accountSubPanel, setAccountSubPanel] = useState(null); // null | "profile" | "settings" | "company"
+  const [accountSubPanel, setAccountSubPanel] = useState(null); // null | "profile" | "settings" | "company" | "dashboard" | "support"
   const [newEmailInput, setNewEmailInput] = useState("");
   const [emailChangeStatus, setEmailChangeStatus] = useState(null); // null | { ok, text }
   const [communeInput, setCommuneInput] = useState("");
@@ -1000,6 +1029,8 @@ export default function App() {
   // calculer la priorité au moment exact où une course arrive.
   const positionsRef = useRef(positions);
   const [priorityAlert, setPriorityAlert] = useState(null); // { ride, shared }
+  const [claimAlert, setClaimAlert] = useState(null); // { ride } — un chauffeur veut prendre une course que j'ai postée
+  const [releaseAlert, setReleaseAlert] = useState(null); // { ride, takenByName } — un chauffeur a relâché une course que j'ai postée
   const knownMessageIds = useRef(new Set());
   const firstMessagesLoad = useRef(true);
   const knownProfileNames = useRef(new Set());
@@ -1191,8 +1222,9 @@ export default function App() {
     const unsubRides = listenRides((newRides) => {
       if (!firstLoad.current) {
         newRides.forEach((r) => {
-          const prevStatus = knownRideIds.current.get(r.id);
-          const isNew = prevStatus === undefined;
+          const prevInfo = knownRideIds.current.get(r.id);
+          const prevStatus = prevInfo?.status;
+          const isNew = prevInfo === undefined;
           if (isNew && r.status === "disponible" && r.postedBy !== driverName) {
             playAlertSound(r.urgent);
             // Suis-je dans le groupe prioritaire sur cette course ?
@@ -1210,10 +1242,22 @@ export default function App() {
           }
           if (!isNew && prevStatus !== r.status && r.postedBy === driverName) {
             notifyStatusChange(r, r.status);
+            if (r.status === "en_attente" && r.pendingBy) {
+              // Où que je sois dans l'appli, un popup s'affiche par-dessus pour
+              // me dire tout de suite qui veut prendre la course que j'ai postée.
+              notifyClaimRequest(r);
+              setClaimAlert({ ride: r });
+            }
+            if (r.status === "disponible" && prevStatus === "prise" && prevInfo?.takenBy) {
+              // Le chauffeur qui l'avait prise l'a relâchée avant de la commencer —
+              // même traitement popup que pour une demande de prise.
+              notifyRideReleased(r, prevInfo.takenBy);
+              setReleaseAlert({ ride: r, takenByName: prevInfo.takenBy });
+            }
           }
         });
       }
-      knownRideIds.current = new Map(newRides.map((r) => [r.id, r.status]));
+      knownRideIds.current = new Map(newRides.map((r) => [r.id, { status: r.status, takenBy: r.takenBy }]));
       firstLoad.current = false;
       setRides(newRides);
     });
@@ -1345,6 +1389,25 @@ export default function App() {
     const id = setInterval(check, 500);
     return () => clearInterval(id);
   }, [priorityAlert, rides]);
+
+  // Ferme le popup "on veut prendre ta course" dès que ce n'est plus vrai —
+  // confirmée (par moi ou automatiquement après 30s), refusée, ou annulée par
+  // le chauffeur qui l'avait demandée.
+  useEffect(() => {
+    if (!claimAlert) return;
+    const current = ridesRef.current.find((x) => x.id === claimAlert.ride.id);
+    if (!current || current.status !== "en_attente" || current.pendingBy !== claimAlert.ride.pendingBy) {
+      setClaimAlert(null);
+    }
+  }, [claimAlert, rides]);
+
+  // Le popup "course relâchée" est purement informatif — il se ferme tout seul
+  // après quelques secondes plutôt que d'attendre une action.
+  useEffect(() => {
+    if (!releaseAlert) return;
+    const id = setTimeout(() => setReleaseAlert(null), 8000);
+    return () => clearTimeout(id);
+  }, [releaseAlert]);
 
   const watchIdRef = useRef(null);
 
@@ -1587,7 +1650,7 @@ export default function App() {
     };
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
-      heure: r.heure, date: r.date || todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: r.urgent, tpmr: r.tpmr || false, notes: r.notes,
+      heure: r.heure, heureRetour: r.heureRetour || "", date: r.date || todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: r.urgent, tpmr: r.tpmr || false, notes: r.notes,
       departLat: r.departLat, departLng: r.departLng, departCity: r.departCity || "", departDept: r.departDept || "",
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
@@ -1603,7 +1666,7 @@ export default function App() {
     editOriginalTarifInputs.current = null;
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
-      heure: "", date: todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: false, tpmr: r.tpmr || false, notes: r.notes,
+      heure: "", heureRetour: "", date: todayKey(0), trajet: r.trajet, tarif: r.tarif, urgent: false, tpmr: r.tpmr || false, notes: r.notes,
       departLat: r.departLat, departLng: r.departLng, departCity: r.departCity || "", departDept: r.departDept || "",
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
@@ -1859,6 +1922,11 @@ export default function App() {
     .filter((r) => r.takenBy === driverName)
     .filter((r) => !dateFilter || dateKey(r.createdAt) === dateFilter);
   const myEarnings = myTakenRides.reduce((sum, r) => sum + (parseFloat(String(r.tarif).replace(",", ".")) || 0), 0);
+
+  const myPostedRides = rides
+    .filter((r) => r.postedBy === driverName)
+    .filter((r) => !dateFilter || dateKey(r.createdAt) === dateFilter);
+  const myPostedValue = myPostedRides.reduce((sum, r) => sum + (parseFloat(String(r.tarif).replace(",", ".")) || 0), 0);
 
   const earningsLabel =
     dateFilter === todayKey(0) ? "aujourd'hui" :
@@ -2197,6 +2265,62 @@ export default function App() {
           </div>
         );
       })()}
+
+      {claimAlert && (() => {
+        const r = claimAlert.ride;
+        const remainingMs = r.pendingSince ? CLAIM_CONFIRM_WINDOW_MS - (Date.now() - r.pendingSince) : 0;
+        return (
+          <div style={styles.claimToast}>
+            <div style={styles.claimToastHeader}>
+              <span style={styles.claimToastTitle}>
+                <Check size={14} style={{ marginRight: 6 }} />
+                <strong>{r.pendingBy}</strong>&nbsp;veut prendre ta course
+              </span>
+              <button onClick={() => setClaimAlert(null)} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+                <X size={15} color="#8A9099" />
+              </button>
+            </div>
+            <div style={styles.claimToastRoute}>{r.depart} → {r.arrivee}</div>
+            <div style={styles.claimToastActions}>
+              <button
+                style={{ ...styles.btnGhost, flex: 1 }}
+                onClick={() => { refuseClaim(r.id); setClaimAlert(null); }}
+              >
+                Refuser
+              </button>
+              <button
+                style={{ ...styles.btnPrimary, flex: 1, justifyContent: "center" }}
+                onClick={() => { confirmClaim(r); setClaimAlert(null); }}
+              >
+                Confirmer
+              </button>
+            </div>
+            {remainingMs > 0 && (
+              <div style={styles.claimToastHint}>
+                Confirmation automatique dans {Math.max(0, Math.ceil(remainingMs / 1000))}s si tu ne réponds pas
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {releaseAlert && (() => {
+        const r = releaseAlert.ride;
+        return (
+          <div style={{ ...styles.claimToast, borderColor: "#E5484D" }}>
+            <div style={styles.claimToastHeader}>
+              <span style={styles.claimToastTitle}>
+                😬 Mince — <strong>&nbsp;{releaseAlert.takenByName}</strong>&nbsp;a relâché ta course
+              </span>
+              <button onClick={() => setReleaseAlert(null)} style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+                <X size={15} color="#8A9099" />
+              </button>
+            </div>
+            <div style={styles.claimToastRoute}>{r.depart} → {r.arrivee} — elle est de nouveau disponible</div>
+          </div>
+        );
+      })()}
+
       {pulling && (
         <div style={styles.pullBanner}>
           ↓ Relâche pour actualiser
@@ -2572,31 +2696,58 @@ export default function App() {
               </div>
             </div>
             <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(0) })}
-                style={{ ...styles.togglePill, flex: 1 }}
-              >
-                Maintenant
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(15) })}
-                style={{ ...styles.togglePill, flex: 1 }}
-              >
-                Dans 15 min
-              </button>
+              {(() => {
+                const isNowActive = form.date === todayKey(0) && form.heure === timePlusMinutes(0);
+                const isPlus15Active = form.date === todayKey(0) && form.heure === timePlusMinutes(15);
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(0) })}
+                      style={{
+                        ...styles.togglePill, flex: 1,
+                        borderColor: isNowActive ? "#FFB43A" : "#3A4048",
+                        background: isNowActive ? "#FFB43A" : "transparent",
+                        color: isNowActive ? "#1A1206" : "#B8BEC6",
+                        fontWeight: isNowActive ? 800 : 600,
+                      }}
+                    >
+                      Maintenant
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(15) })}
+                      style={{
+                        ...styles.togglePill, flex: 1,
+                        borderColor: isPlus15Active ? "#FFB43A" : "#3A4048",
+                        background: isPlus15Active ? "#FFB43A" : "transparent",
+                        color: isPlus15Active ? "#1A1206" : "#B8BEC6",
+                        fontWeight: isPlus15Active ? 800 : 600,
+                      }}
+                    >
+                      Dans 15 min
+                    </button>
+                  </>
+                );
+              })()}
             </div>
-            <label style={styles.formLabel}>
-              Date de la course
-              <input style={styles.input} type="date" lang="fr-FR" value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })} required />
-            </label>
             <label style={styles.formLabel}>
               Heure de prise en charge
               <input style={styles.input} type="time" value={form.heure}
                 onChange={(e) => setForm({ ...form, heure: e.target.value })} required />
             </label>
+            <label style={styles.formLabel}>
+              Date de la course
+              <input style={styles.input} type="date" lang="fr-FR" value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+            </label>
+            {form.trajet === "allerRetour" && (
+              <label style={{ ...styles.formLabel, gridColumn: "1 / -1" }}>
+                Heure de prise en charge retour (optionnel)
+                <input style={styles.input} type="time" value={form.heureRetour}
+                  onChange={(e) => setForm({ ...form, heureRetour: e.target.value })} />
+              </label>
+            )}
             {form.type === "taxi" ? (
               <label style={{ ...styles.formLabel, gridColumn: "1 / -1" }}>
                 Tarif conventionné
@@ -2950,6 +3101,7 @@ export default function App() {
 
                 <div style={styles.metaRow}>
                   <span style={styles.metaItem}><Clock size={13} /> Prise en charge : {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
+                  {r.heureRetour && <span style={styles.metaItem}>Retour : {r.heureRetour}</span>}
                   {r.calcDistanceKm != null && (
                     <span style={styles.metaItem}>
                       ({r.calcDistanceKm} km {r.calcIsRoadDistance ? "réels (route)" : "à vol d'oiseau"})
@@ -3127,6 +3279,12 @@ export default function App() {
                   <Clock size={16} color="#FFB43A" />
                   <span>Prise en charge {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
                 </div>
+                {r.heureRetour && (
+                  <div style={styles.modalRow}>
+                    <Clock size={16} color="#8A9099" />
+                    <span>Retour prévu à {r.heureRetour}</span>
+                  </div>
+                )}
                 {r.tarif && (
                   <div style={styles.modalRow}>
                     <span className="rp-meter" style={{ fontSize: 28 }}>{r.tarif} €</span>
@@ -3412,6 +3570,8 @@ export default function App() {
                 {accountSubPanel === "profile" ? "Modifier mon profil"
                   : accountSubPanel === "settings" ? "Réglages"
                   : accountSubPanel === "company" ? "Ma société"
+                  : accountSubPanel === "dashboard" ? "Tableau de bord"
+                  : accountSubPanel === "support" ? "Aide & réclamations"
                   : driverName}
               </h2>
               <button onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); }} style={styles.iconBtn}>
@@ -3443,6 +3603,14 @@ export default function App() {
                   </button>
                   <button onClick={() => setAccountSubPanel("company")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><Building2 size={16} /> Ma société</span>
+                    <span style={{ color: "#6E757E" }}>›</span>
+                  </button>
+                  <button onClick={() => setAccountSubPanel("dashboard")} style={styles.categoryBtn}>
+                    <span style={styles.categoryBtnLeft}><LayoutDashboard size={16} /> Tableau de bord</span>
+                    <span style={{ color: "#6E757E" }}>›</span>
+                  </button>
+                  <button onClick={() => setAccountSubPanel("support")} style={styles.categoryBtn}>
+                    <span style={styles.categoryBtnLeft}><LifeBuoy size={16} /> Aide & réclamations</span>
                     <span style={{ color: "#6E757E" }}>›</span>
                   </button>
                   {isAdmin && (
@@ -3670,6 +3838,67 @@ export default function App() {
                 </button>
               </div>
             )}
+
+            {accountSubPanel === "dashboard" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <p style={{ color: "#8A9099", fontSize: 13 }}>
+                  Résumé {earningsLabel} — change le filtre de date depuis l'accueil pour changer la période.
+                </p>
+                <div style={styles.gainsCard}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <span style={styles.gainsLabel}>Courses déposées</span>
+                    <span style={styles.gainsAmount}>{myPostedValue.toFixed(2)} €</span>
+                  </div>
+                  <span style={styles.gainsCount}>
+                    {myPostedRides.length} course{myPostedRides.length > 1 ? "s" : ""}<br />postée{myPostedRides.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div style={styles.gainsCard}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    <span style={styles.gainsLabel}>Courses prises</span>
+                    <span style={styles.gainsAmount}>{myEarnings.toFixed(2)} €</span>
+                  </div>
+                  <span style={styles.gainsCount}>
+                    {myTakenRides.length} course{myTakenRides.length > 1 ? "s" : ""}<br />reprise{myTakenRides.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {accountSubPanel === "support" && (() => {
+              const adminEntry = Object.entries(profiles).find(([, p]) => p.email === ADMIN_EMAIL);
+              const adminPhone = adminEntry?.[1]?.phone || null;
+              const mailSubject = encodeURIComponent("Réclamation / support RoulePartner");
+              const mailBody = encodeURIComponent(`Chauffeur : ${driverName}\n\nDécris ton problème ici :\n`);
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <p style={{ color: "#8A9099", fontSize: 13 }}>
+                    Un souci avec une course, un chauffeur, ou l'application ? Précise ton pseudo et,
+                    si besoin, la course concernée — ça aide à traiter la demande plus vite.
+                  </p>
+                  <a
+                    href={`mailto:${ADMIN_EMAIL}?subject=${mailSubject}&body=${mailBody}`}
+                    style={{ ...styles.categoryBtn, textDecoration: "none" }}
+                  >
+                    <span style={styles.categoryBtnLeft}><Mail size={16} /> Envoyer un email</span>
+                    <span style={{ color: "#6E757E" }}>›</span>
+                  </a>
+                  {adminPhone ? (
+                    <a
+                      href={`sms:${adminPhone.replace(/\s/g, "")}`}
+                      style={{ ...styles.categoryBtn, textDecoration: "none" }}
+                    >
+                      <span style={styles.categoryBtnLeft}><MessageCircle size={16} /> Envoyer un SMS</span>
+                      <span style={{ color: "#6E757E" }}>›</span>
+                    </a>
+                  ) : (
+                    <p style={{ color: "#6E757E", fontSize: 12 }}>
+                      Numéro de l'administrateur non renseigné pour l'instant — passe par email.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -4013,7 +4242,10 @@ const styles = {
   btnPrimary: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "10px 16px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 14 },
   btnGhost: { background: "transparent", border: "1px solid #3A4048", color: "#F2F4F7", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
   btnClaim: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "8px 14px", borderRadius: 8, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 13 },
-  formCard: { margin: "0 24px 20px", background: "#191C21", borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14 },
+  formCard: {
+    margin: "0 24px 20px", background: "#1F1A12", border: "1px solid rgba(255,180,58,0.35)",
+    borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14,
+  },
   formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
   typeChip: { border: "none", padding: "12px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700, minHeight: 48 },
@@ -4022,8 +4254,8 @@ const styles = {
   fieldLabel: { display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, color: "#E4E7EB", fontWeight: 700 },
   formLabel: {
     display: "flex", flexDirection: "column", gap: 7,
-    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600,
-    color: "#8A9099", textTransform: "uppercase", letterSpacing: "0.10em",
+    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 800,
+    color: "#B8BEC6", textTransform: "uppercase", letterSpacing: "0.10em",
   },
   sectionLabel: {
     fontFamily: "'Manrope', sans-serif", fontSize: 11.5, fontWeight: 700,
@@ -4241,6 +4473,16 @@ const styles = {
     fontSize: 13, color: "#8A9099", alignItems: "center",
   },
   priorityAlertActions: { display: "flex", gap: 10 },
+  claimToast: {
+    position: "fixed", top: 16, left: 16, right: 16, maxWidth: 420, margin: "0 auto", zIndex: 250,
+    background: "#191C21", border: "1px solid #FFB43A", borderRadius: 14,
+    padding: "14px 16px", boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
+  },
+  claimToastHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 },
+  claimToastTitle: { display: "flex", alignItems: "center", fontSize: 14, color: "#F2F4F7" },
+  claimToastRoute: { fontSize: 13, color: "#B8BEC6", marginBottom: 12 },
+  claimToastActions: { display: "flex", gap: 10 },
+  claimToastHint: { fontSize: 11, color: "#6E757E", marginTop: 10, textAlign: "center" },
   pullBanner: {
     position: "fixed", top: 0, left: 0, right: 0, zIndex: 200,
     background: "#FFB43A", color: "#1A1206", textAlign: "center",
