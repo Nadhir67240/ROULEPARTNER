@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function isAdmin() {
+      return isVerified() && request.auth.token.email == 'taxi-vsl67@hotmail.com';
+    }
+    function isMe(name) {
+      return isVerified() && request.auth.token.name == name;
+    }
+    function isBanned() {
+      return exists(/databases/$(database)/documents/profiles/$(request.auth.token.name))
+        && get(/databases/$(database)/documents/profiles/$(request.auth.token.name)).data.banned == true;
+    }
+
+    function priorityDriversOf(data) {
+      return data.get('priorityDrivers', []);
+    }
+    function priorityUntilOf(data) {
+      return data.get('priorityUntil', 0);
+    }
+    function priorityFieldsUnchanged() {
+      return request.resource.data.get('priorityDrivers', []) == resource.data.get('priorityDrivers', [])
+        && request.resource.data.get('priorityUntil', 0) == resource.data.get('priorityUntil', 0);
+    }
+    function isPriorityEligible() {
+      // Tant que la Cloud Function notifyNewRide n'a pas encore écrit priorityDrivers sur le
+      // document (quelques centaines de ms à quelques secondes après la création), une liste
+      // vide est ambiguë : "personne dans le rayon" ou "pas encore calculé" ? On refuse dans ce
+      // second cas plutôt que de considérer tout le monde comme prioritaire par défaut, sinon
+      // n'importe qui peut voler la priorité pendant cette fenêtre via un appel direct à
+      // Firestore.
+      return ('priorityDrivers' in resource.data) && (
+        priorityDriversOf(resource.data).size() == 0
+        || request.time.toMillis() > priorityUntilOf(resource.data)
+        || (request.auth.token.name in priorityDriversOf(resource.data))
+      );
+    }
+
+    match /rides/{rideId} {
+      allow read: if isVerified();
+      allow create: if isAdmin() || (
+        isVerified() && !isBanned()
+        && request.resource.data.postedBy == request.auth.token.name
+        && !('priorityDrivers' in request.resource.data)
+        && !('priorityUntil' in request.resource.data)
+      );
+      allow delete: if isAdmin() || (isVerified() && !isBanned() && resource.data.postedBy == request.auth.token.name);
+      allow update: if isAdmin() || (
+        isVerified() && !isBanned() && priorityFieldsUnchanged() && (
+          resource.data.postedBy == request.auth.token.name
+          || resource.data.takenBy == request.auth.token.name
+          || resource.data.pendingBy == request.auth.token.name
+          || (
+            resource.data.status == 'disponible'
+            && request.resource.data.status == 'en_attente'
+            && request.resource.data.pendingBy == request.auth.token.name
+            && isPriorityEligible()
+          )
+        )
+      );
+    }
+
+    match /positions/{driverId} {
+      allow read: if isVerified();
+      allow write: if isAdmin() || (isMe(driverId) && !isBanned());
+    }
+
+    match /profiles/{driverId} {
+      allow read: if isVerified();
+      allow write: if isAdmin() || (isMe(driverId) && !isBanned());
+    }
+
+    match /messages/{messageId} {
+      allow read: if isVerified();
+      allow create: if isAdmin() || (isVerified() && !isBanned() && request.resource.data.senderName == request.auth.token.name);
+      allow update, delete: if isAdmin() || (isVerified() && !isBanned() && resource.data.senderName == request.auth.token.name);
+    }
+
+    match /licenses/{licenseId} {
+      allow read: if isVerified();
+      allow create: if request.auth != null;
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isVerified() && resource.data.owner == request.auth.token.name);
+    }
+
+    match /fcmTokens/{name} {
+      allow read: if false;
+      allow write: if isAdmin() || (isMe(name) && !isBanned());
+    }
+  }
+}

@@ -6,6 +6,7 @@ import {
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
   FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil, CalendarPlus, CalendarCheck,
+  Users,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -38,11 +39,16 @@ function trajetLabel(id) {
 // peuvent prendre la course. Passé ce délai, elle s'ouvre à tout le monde.
 const PRIORITY_WINDOW_MS = 15 * 1000;
 
-// Si plusieurs chauffeurs sont quasiment à la même distance du départ, les
-// départager au mètre près n'a aucun sens (position GPS imprécise, sens de
-// circulation...). On considère donc comme "à égalité" tous ceux situés à moins
-// de PRIORITY_TIE_KM du plus proche : ils reçoivent la course en même temps.
-const PRIORITY_TIE_KM = 1.0;
+// Rayon autour de la prise en charge à l'intérieur duquel un chauffeur est prioritaire —
+// doit rester identique à PRIORITY_RADIUS_KM dans functions/index.js, qui fait foi pour
+// l'attribution réelle (règles de sécurité Firestore). Cette valeur ne sert ici qu'à
+// afficher l'alerte de priorité et verrouiller "Je la prends" instantanément dès l'arrivée
+// de la course, avant que le serveur n'ait eu le temps d'écrire sa propre liste sur le
+// document (voir r.priorityDrivers, qui prend le relais dès qu'il existe et fait foi).
+const PRIORITY_RADIUS_KM = 1.0;
+
+// Une position n'est prise en compte que si elle est récente — même règle que côté serveur.
+const POSITION_FRESH_MS = 15 * 60 * 1000;
 
 // Nombre maximum de chauffeurs prioritaires simultanés.
 const PRIORITY_MAX_DRIVERS = 3;
@@ -276,18 +282,16 @@ function notifyNewRide(ride) {
 function computePriorityDrivers(ride, positions) {
   const origin = ridePickupCoords(ride);
   if (!origin) return [];
+  const now = Date.now();
   const candidates = [];
   Object.entries(positions || {}).forEach(([name, pos]) => {
     if (name === ride.postedBy) return;
+    if (pos.updatedAt && now - pos.updatedAt > POSITION_FRESH_MS) return;
     const d = distanceKm(origin, pos);
-    if (d != null) candidates.push({ name, dist: d });
+    if (d != null && d <= PRIORITY_RADIUS_KM) candidates.push({ name, dist: d });
   });
-  if (candidates.length === 0) return [];
   candidates.sort((a, b) => a.dist - b.dist);
-  const closest = candidates[0].dist;
-  return candidates
-    .filter((c) => c.dist - closest < PRIORITY_TIE_KM)
-    .slice(0, PRIORITY_MAX_DRIVERS);
+  return candidates.slice(0, PRIORITY_MAX_DRIVERS);
 }
 
 // Notification "course prioritaire" : plus insistante que la notification
@@ -848,6 +852,7 @@ export default function App() {
   const [newRidesBadge, setNewRidesBadge] = useState(0);
   const filterRef = useRef("dispo");
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
+  const [showViewMenu, setShowViewMenu] = useState(false);
   const [banTarget, setBanTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [banReason, setBanReason] = useState("");
@@ -1331,7 +1336,7 @@ export default function App() {
     if (!priorityAlert) return;
     const check = () => {
       const current = ridesRef.current.find((x) => x.id === priorityAlert.ride.id);
-      const expired = Date.now() - priorityAlert.ride.createdAt >= PRIORITY_WINDOW_MS;
+      const expired = Date.now() >= priorityWindowEndsAt(priorityAlert.ride);
       if (expired || !current || current.status !== "disponible") {
         setPriorityAlert(null);
       }
@@ -1615,9 +1620,13 @@ export default function App() {
   // Plusieurs chauffeurs prioritaires peuvent taper en même temps : la
   // transaction côté Firestore n'en laisse passer qu'un seul, les autres
   // reçoivent "already_taken" et sont prévenus proprement.
-  const claim = async (id) => {
+  const claim = async (ride) => {
     try {
-      await claimRide(id, driverName);
+      await claimRide(ride.id, driverName);
+      // Ouvre directement la fenêtre de détail sur la course qu'on vient de
+      // prendre, pour que le chauffeur voie tout de suite le compte à rebours
+      // de confirmation sans avoir à la rechercher dans la liste.
+      setSelectedRide(ride);
     } catch (e) {
       if (e.message === "already_taken") {
         setError("Trop tard — un autre chauffeur vient de prendre cette course.");
@@ -1789,12 +1798,24 @@ export default function App() {
     }
   };
 
-  // Renvoie la liste des chauffeurs prioritaires sur une course, triés du plus
-  // proche au plus loin. En général c'est un seul chauffeur (le plus proche),
-  // mais si d'autres sont pratiquement à la même distance (< PRIORITY_TIE_KM
-  // d'écart), ils sont tous prioritaires en même temps et c'est le premier qui
-  // accepte qui l'emporte — la transaction Firestore garantit qu'un seul gagne.
-  const priorityDriversFor = (ride) => computePriorityDrivers(ride, positions);
+  // Chauffeurs prioritaires sur une course. Dès que le serveur a eu le temps d'écrire sa
+  // propre liste sur le document (r.priorityDrivers — voir functions/index.js), on s'y fie :
+  // c'est elle qui fait foi pour l'attribution réelle (règles de sécurité Firestore). Avant ça
+  // (les toutes premières secondes après la publication, le temps que la Cloud Function se
+  // déclenche), on retombe sur une estimation locale utilisant le même algorithme que le
+  // serveur, pour que l'alerte de priorité et le verrouillage de "Je la prends" réagissent
+  // instantanément sans attendre le serveur — la transaction Firestore garantit de toute façon
+  // qu'un seul chauffeur gagne si plusieurs tapent en même temps.
+  const priorityDriversFor = (ride) => {
+    if (Array.isArray(ride.priorityDrivers)) {
+      return ride.priorityDrivers.map((name) => ({ name, dist: null }));
+    }
+    return computePriorityDrivers(ride, positions);
+  };
+
+  // Fin de la fenêtre de priorité : la valeur écrite par le serveur (priorityUntil) fait foi
+  // dès qu'elle existe, sinon on l'estime depuis l'heure de création de la course.
+  const priorityWindowEndsAt = (ride) => ride.priorityUntil ?? (ride.createdAt + PRIORITY_WINDOW_MS);
 
   const myPos = positions[driverName] || null;
 
@@ -1888,6 +1909,7 @@ export default function App() {
       if (filter === "dispo") return r.status === "disponible";
       if (filter === "mine") return r.postedBy === driverName || r.takenBy === driverName || r.pendingBy === driverName;
       if (filter === "recues") return r.takenBy === driverName && r.postedBy !== driverName;
+      if (filter === "donnees") return r.postedBy === driverName;
       if (filter === "historique") return r.status === "terminee";
       return true;
     })
@@ -2082,6 +2104,16 @@ export default function App() {
     );
   }
 
+  const viewTabs = [
+    { id: "recues", label: "Reçues", icon: Inbox },
+    { id: "donnees", label: "Données", icon: Send },
+    { id: "carte", label: "Carte", icon: MapIcon },
+    { id: "planning", label: "Planning", icon: Clock },
+    { id: "historique", label: "Historique", icon: History },
+    { id: "toutes", label: "Toutes", icon: List },
+  ];
+  const activeViewTab = viewTabs.find((t) => t.id === filter);
+
   return (
     <div style={styles.page}>
       <style>{`
@@ -2103,7 +2135,7 @@ export default function App() {
         const meta = typeMeta(r.type);
         const secondsLeft = Math.max(
           0,
-          Math.ceil((PRIORITY_WINDOW_MS - (Date.now() - r.createdAt)) / 1000)
+          Math.ceil((priorityWindowEndsAt(r) - Date.now()) / 1000)
         );
         const dist = myPos ? distanceKm(myPos, ridePickupCoords(r)) : null;
         return (
@@ -2154,7 +2186,7 @@ export default function App() {
                 <button
                   style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 15, justifyContent: "center" }}
                   onClick={async () => {
-                    await claim(r.id);
+                    await claim(r);
                     setPriorityAlert(null);
                   }}
                 >
@@ -2182,14 +2214,25 @@ export default function App() {
             </span>
           </div>
         </div>
-        <button
-          onClick={sharePosition}
-          aria-label="Basculer en service / hors service"
-          style={{ ...styles.statusPill, ...(myPosStatus === "ok" ? styles.statusPillOn : styles.statusPillOff) }}
-        >
-          <span style={{ ...styles.statusDot, background: myPosStatus === "ok" ? "#3BD07A" : "#6E757E" }} />
-          {myPosStatus === "ok" ? "En service" : myPosStatus === "locating" ? "Localisation…" : "Hors service"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {isAdmin && (
+            <span
+              style={styles.onlineDriversBadge}
+              title="Chauffeurs en ligne (visible admin uniquement)"
+            >
+              <Users size={13} />
+              {Object.values(positions).filter((p) => p.updatedAt && Date.now() - p.updatedAt < POSITION_FRESH_MS).length}
+            </span>
+          )}
+          <button
+            onClick={sharePosition}
+            aria-label="Basculer en service / hors service"
+            style={{ ...styles.statusPill, ...(myPosStatus === "ok" ? styles.statusPillOn : styles.statusPillOff) }}
+          >
+            <span style={{ ...styles.statusDot, background: myPosStatus === "ok" ? "#3BD07A" : "#6E757E" }} />
+            {myPosStatus === "ok" ? "En service" : myPosStatus === "locating" ? "Localisation…" : "Hors service"}
+          </button>
+        </div>
       </header>
       {myPosStatus === "denied" && (
         <div style={styles.hintBanner}>Position refusée — vérifie les réglages du navigateur pour recevoir les courses proches de toi.</div>
@@ -2213,24 +2256,17 @@ export default function App() {
             : formatDayMonth(dateFilter)}
         </button>
         <div style={{ width: 1, alignSelf: "stretch", background: "#23272E", flexShrink: 0 }} />
-        {[
-          { id: "recues", label: "Reçues", icon: Inbox },
-          { id: "carte", label: "Carte", icon: MapIcon },
-          { id: "planning", label: "Planning", icon: Clock },
-          { id: "historique", label: "Historique", icon: History },
-          { id: "toutes", label: "Toutes", icon: List },
-        ].map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setFilter(t.id)}
-            style={{
-              ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-              ...(filter === t.id ? styles.tabActive : {}),
-            }}
-          >
-            <t.icon size={13} /> {t.label}
-          </button>
-        ))}
+        <button
+          onClick={() => setShowViewMenu(true)}
+          style={{
+            ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+            ...(activeViewTab ? styles.tabActive : {}),
+          }}
+        >
+          {activeViewTab ? <activeViewTab.icon size={13} /> : <List size={13} />}
+          {activeViewTab ? activeViewTab.label : "Vues"}
+          <ChevronDown size={13} />
+        </button>
       </div>
 
       {showFilterMenu && (
@@ -2257,6 +2293,33 @@ export default function App() {
                 {v === "all" ? "Toute distance" : `Rayon de ${v} km`}
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {showViewMenu && (
+        <div style={styles.modalOverlay} onClick={() => setShowViewMenu(false)}>
+          <div style={{ ...styles.modalCard, maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h2 style={styles.modalTitle}>Changer de vue</h2>
+              <button onClick={() => setShowViewMenu(false)} style={styles.iconBtn}><X size={16} /></button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {viewTabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => { setFilter(t.id); setShowViewMenu(false); }}
+                  style={{
+                    ...styles.togglePill, width: "100%", justifyContent: "flex-start", gap: 8,
+                    borderColor: filter === t.id ? "#FFB43A" : "#3A4048",
+                    color: filter === t.id ? "#1A1206" : "#B8BEC6",
+                    background: filter === t.id ? "#FFB43A" : "transparent",
+                  }}
+                >
+                  <t.icon size={14} /> {t.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -2828,8 +2891,8 @@ export default function App() {
             const pendingByMe = r.pendingBy === driverName;
             const pendingRemainingMs = r.pendingSince ? CLAIM_CONFIRM_WINDOW_MS - (Date.now() - r.pendingSince) : 0;
             const priorityDrivers = priorityDriversFor(r);
-            const withinWindow = Date.now() - r.createdAt < PRIORITY_WINDOW_MS;
-            const remainingMs = PRIORITY_WINDOW_MS - (Date.now() - r.createdAt);
+            const withinWindow = Date.now() < priorityWindowEndsAt(r);
+            const remainingMs = priorityWindowEndsAt(r) - Date.now();
             const remainingLabel = remainingMs > 0 ? `${Math.ceil(remainingMs / 1000)}s` : null;
             const iAmPriority = priorityDrivers.some((d) => d.name === driverName);
             const isPriorityLocked =
@@ -2915,7 +2978,7 @@ export default function App() {
                   <div style={styles.priorityBanner}>
                     <Timer size={13} style={{ marginRight: 6 }} />
                     {priorityDrivers.length === 1
-                      ? `Priorité à ${priorityDrivers[0].name} (${priorityDrivers[0].dist.toFixed(1)} km)`
+                      ? `Priorité à ${priorityDrivers[0].name}${priorityDrivers[0].dist != null ? ` (${priorityDrivers[0].dist.toFixed(1)} km)` : ""}`
                       : `Priorité aux ${priorityDrivers.length} chauffeurs les plus proches`}
                     {" "}— ouvert à tous dans {remainingLabel}
                   </div>
@@ -2946,7 +3009,7 @@ export default function App() {
                   <span style={styles.postedBy}>Posté par {r.postedBy} · {formatPostedAt(r.createdAt)}</span>
                   <div style={{ display: "flex", gap: 8 }}>
                     {r.status === "disponible" && !mine && !isPriorityLocked && (
-                      <button onClick={(e) => { e.stopPropagation(); claim(r.id); }} style={styles.btnClaim}>
+                      <button onClick={(e) => { e.stopPropagation(); claim(r); }} style={styles.btnClaim}>
                         <Check size={14} style={{ marginRight: 4 }} />
                         Je la prends
                       </button>
@@ -3001,14 +3064,17 @@ export default function App() {
       )}
 
       {selectedRide && (() => {
-        const r = selectedRide;
+        // Dérivé de la liste live plutôt que figé sur l'instantané passé à
+        // setSelectedRide, pour que la fenêtre reflète en direct les
+        // changements de statut (ex. confirmation d'une demande en attente).
+        const r = rides.find((x) => x.id === selectedRide.id) || selectedRide;
         const meta = typeMeta(r.type);
         const mine = r.postedBy === driverName;
         const takenByMe = r.takenBy === driverName;
         const pendingByMe = r.pendingBy === driverName;
         const pendingRemainingMs = r.pendingSince ? CLAIM_CONFIRM_WINDOW_MS - (Date.now() - r.pendingSince) : 0;
         const priorityDrivers = priorityDriversFor(r);
-        const withinWindow = Date.now() - r.createdAt < PRIORITY_WINDOW_MS;
+        const withinWindow = Date.now() < priorityWindowEndsAt(r);
         const iAmPriority = priorityDrivers.some((d) => d.name === driverName);
         const isPriorityLocked =
           r.status === "disponible" && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
@@ -3173,7 +3239,7 @@ export default function App() {
                 <div style={styles.priorityBanner}>
                   <Timer size={13} style={{ marginRight: 6 }} />
                   {priorityDrivers.length === 1
-                    ? `Priorité à ${priorityDrivers[0].name} (${priorityDrivers[0].dist.toFixed(1)} km)`
+                    ? `Priorité à ${priorityDrivers[0].name}${priorityDrivers[0].dist != null ? ` (${priorityDrivers[0].dist.toFixed(1)} km)` : ""}`
                     : `Priorité aux ${priorityDrivers.length} chauffeurs les plus proches`}
                 </div>
               )}
@@ -3201,7 +3267,7 @@ export default function App() {
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" }}>
                 {r.status === "disponible" && !mine && !isPriorityLocked && (
-                  <button onClick={() => { claim(r.id); setSelectedRide(null); }} style={styles.btnPrimaryAction}>
+                  <button onClick={() => claim(r)} style={styles.btnPrimaryAction}>
                     <Check size={16} /> Je la prends
                   </button>
                 )}
@@ -3282,7 +3348,7 @@ export default function App() {
           onClick={() => setFilter("dispo")}
           style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "#FFB43A" : "#8A9099", position: "relative" }}
         >
-          <Home size={18} />
+          <Home size={22} />
           {newRidesBadge > 0 && (
             <span style={styles.navBadge}>{newRidesBadge > 9 ? "9+" : newRidesBadge}</span>
           )}
@@ -3292,20 +3358,20 @@ export default function App() {
           onClick={() => setFilter("mine")}
           style={{ ...styles.bottomNavBtn, color: filter === "mine" ? "#FFB43A" : "#8A9099" }}
         >
-          <Car size={18} />
+          <Car size={22} />
           <span style={styles.bottomNavLabel}>Courses</span>
         </button>
         {/* Emplacement réservé au bouton + flottant, pour qu'il ne recouvre aucun onglet. */}
         <div style={styles.bottomNavFabSlot} aria-hidden="true" />
         <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, position: "relative" }}>
-          <MessageCircle size={18} />
+          <MessageCircle size={22} />
           {totalUnreadMessages > 0 && (
             <span style={styles.navBadge}>{totalUnreadMessages > 9 ? "9+" : totalUnreadMessages}</span>
           )}
           <span style={styles.bottomNavLabel}>Messages</span>
         </button>
         <button onClick={() => setShowAccountPanel(true)} style={styles.bottomNavBtn}>
-          <User size={18} />
+          <User size={22} />
           <span style={styles.bottomNavLabel}>Compte</span>
         </button>
       </nav>
@@ -3934,6 +4000,11 @@ const styles = {
   statusPillOn: { background: "rgba(59,208,122,0.10)", borderColor: "rgba(59,208,122,0.28)", color: "#3BD07A" },
   statusPillOff: { background: "#22262C", borderColor: "#2A2F36", color: "#8A9099" },
   statusDot: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0 },
+  onlineDriversBadge: {
+    display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 999,
+    border: "1px solid rgba(255,180,58,0.28)", background: "rgba(255,180,58,0.10)", color: "#FFB43A",
+    fontSize: 12, fontWeight: 700, fontFamily: "'Manrope', sans-serif",
+  },
   dateFilterRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   iconBtn: { background: "#23272E", border: "1px solid #3A4048", color: "#F2F4F7", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", alignItems: "center", fontSize: 12 },
   tabs: { display: "flex", gap: 8, padding: "16px 24px", alignItems: "center", flexWrap: "wrap" },

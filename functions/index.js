@@ -1,4 +1,4 @@
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 
@@ -7,6 +7,9 @@ const db = admin.firestore();
 
 // Europe/Paris : garde les fonctions près des chauffeurs, ça réduit la latence.
 setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
+
+// Doit correspondre exactement à l'email admin utilisé dans firestore.rules et App.jsx.
+const ADMIN_EMAIL = "taxi-vsl67@hotmail.com";
 
 // --- Ces valeurs doivent rester alignées avec celles de src/App.jsx ---
 const PRIORITY_WINDOW_MS = 15 * 1000;
@@ -104,6 +107,11 @@ async function sendTo(entries, payload) {
     notification: payload.notification,
     data: payload.data,
     webpush: {
+      // Sans l'en-tête Urgency, le service de push (celui de Chrome sur Android
+      // en particulier) traite la notification comme "normal" et peut la
+      // retarder de plusieurs minutes en mode Doze/économie de batterie. "high"
+      // force une livraison immédiate même téléphone en veille.
+      headers: { Urgency: "high" },
       notification: {
         icon: "/icon-192.png",
         badge: "/icon-192.png",
@@ -143,6 +151,17 @@ exports.notifyNewRide = onDocumentCreated(
     const priority = computePriorityDrivers(ride, positions);
     const priorityNames = priority.map((p) => p.name);
     const shared = priority.length > 1;
+
+    // Écrit la liste des chauffeurs prioritaires (et la fin de la fenêtre) directement sur le
+    // document, le plus tôt possible après la création. C'est cette valeur, écrite par une
+    // Cloud Function de confiance (donc jamais falsifiable par un client), que les règles de
+    // sécurité Firestore utilisent pour interdire réellement à un chauffeur non prioritaire de
+    // prendre la course avant tout le monde — l'app cliente ne faisait jusqu'ici que masquer le
+    // bouton, sans empêcher la prise via un appel direct à Firestore.
+    await snap.ref.update({
+      priorityDrivers: priorityNames,
+      priorityUntil: (ride.createdAt || Date.now()) + PRIORITY_WINDOW_MS,
+    });
 
     const route = `${ride.depart} → ${ride.arrivee}`;
     const baseData = {
@@ -190,6 +209,56 @@ exports.notifyNewRide = onDocumentCreated(
         body: `${route} — ${ride.heure || ""}`.trim(),
       },
       data: { ...baseData, priority: "false", shared: "false" },
+    });
+  }
+);
+
+// Prévient le posteur quand sa course démarre ou se termine. Reprend ce que faisait
+// l'ancien onRideWrite (index.js.js, racine, jamais nettoyé de la prod) — portée ici pour
+// pouvoir enfin supprimer ce doublon.
+exports.notifyRideStatusChange = onDocumentUpdated(
+  { document: "rides/{rideId}", timeoutSeconds: 30 },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!after || !before || before.status === after.status) return;
+    if (!["en_cours", "terminee"].includes(after.status)) return;
+
+    const entries = await tokensFor([after.postedBy]);
+    await sendTo(entries, {
+      notification: {
+        title: after.status === "en_cours" ? "🚗 Ta course a démarré" : "✅ Ta course est terminée",
+        body: `${after.depart} → ${after.arrivee} — prise par ${after.takenBy || "?"}`,
+      },
+      data: {
+        rideId: event.params.rideId,
+        depart: String(after.depart || ""),
+        arrivee: String(after.arrivee || ""),
+        heure: String(after.heure || ""),
+      },
+    });
+  }
+);
+
+// Prévient l'admin à chaque nouvelle inscription de chauffeur. Reprend ce que faisait
+// l'ancien onNewProfile (index.js.js, racine, jamais nettoyé de la prod) — portée ici pour
+// pouvoir enfin supprimer ce doublon.
+exports.notifyNewProfile = onDocumentCreated(
+  { document: "profiles/{name}", timeoutSeconds: 30 },
+  async (event) => {
+    const newDriverName = event.params.name;
+    const adminSnap = await db.collection("profiles").where("email", "==", ADMIN_EMAIL).limit(1).get();
+    if (adminSnap.empty) return;
+    const adminName = adminSnap.docs[0].id;
+    if (adminName === newDriverName) return;
+
+    const entries = await tokensFor([adminName]);
+    await sendTo(entries, {
+      notification: {
+        title: "🆕 Nouveau chauffeur inscrit",
+        body: `${newDriverName} vient de créer un compte sur RoulePartner.`,
+      },
+      data: { rideId: `nouveau-chauffeur-${newDriverName}` },
     });
   }
 );
