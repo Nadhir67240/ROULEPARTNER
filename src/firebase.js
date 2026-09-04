@@ -1,6 +1,8 @@
 import { initializeApp } from "firebase/app";
 import {
-  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   doc,
   setDoc,
@@ -13,6 +15,8 @@ import {
   orderBy,
   limit,
   runTransaction,
+  disableNetwork,
+  enableNetwork,
 } from "firebase/firestore";
 import {
   getAuth,
@@ -37,8 +41,28 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+// Cache local persistant (IndexedDB) : sans ça, une écriture (prendre une
+// course, envoyer un message...) faite pendant que le flux temps réel est
+// coupé (téléphone en veille/arrière-plan pendant 1-2h, comme en usage réel)
+// ne reste qu'en mémoire — si l'appli est rechargée ou déchargée par l'OS
+// avant reconnexion, l'écriture est perdue sans aucune erreur visible.
+// Avec la persistance, l'écriture survit et repart dès que le réseau revient.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 export const auth = getAuth(app);
+
+// Force une reprise de la synchronisation dès que l'appli redevient visible
+// (retour au premier plan après une longue veille) : on coupe puis on rouvre
+// la connexion plutôt que d'attendre que le SDK détecte tout seul que le
+// flux temps réel est mort, ce qui peut prendre du temps sur mobile.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      disableNetwork(db).then(() => enableNetwork(db)).catch(() => {});
+    }
+  });
+}
 
 const ridesCol = collection(db, "rides");
 const positionsCol = collection(db, "positions");
