@@ -2364,12 +2364,6 @@ export default function App() {
 
       <div style={{ display: "flex", gap: 8, padding: "12px 24px 14px", alignItems: "center", overflowX: "auto" }}>
         <button
-          onClick={() => setShowFilterMenu(true)}
-          style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-        >
-          <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
-        </button>
-        <button
           onClick={() => setShowCalendarMenu(true)}
           style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
         >
@@ -2378,6 +2372,12 @@ export default function App() {
             : dateFilter === todayKey(0) ? "Aujourd'hui"
             : dateFilter === todayKey(1) ? "Demain"
             : formatDayMonth(dateFilter)}
+        </button>
+        <button
+          onClick={() => setShowFilterMenu(true)}
+          style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+        >
+          <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
         </button>
         <div style={{ width: 1, alignSelf: "stretch", background: "#23272E", flexShrink: 0 }} />
         <button
