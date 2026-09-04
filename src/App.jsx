@@ -198,6 +198,38 @@ function formatDayMonth(dateStr) {
   return `${d} ${FRENCH_MONTHS[m - 1]}`;
 }
 
+const FRENCH_WEEKDAYS_SHORT = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+
+// Badge de timing d'une course : le chauffeur doit voir d'un coup d'oeil si
+// c'est pour tout de suite (rouge, pulse), pour bientôt aujourd'hui (orange),
+// ou pour un autre jour (bleu, avec le jour de la semaine) — plutôt que de
+// devoir lire la date/heure en petit texte dans les détails.
+function rideTimingBadge(r) {
+  if (!r.date || !r.heure) return null;
+  const [h, mnt] = r.heure.split(":").map(Number);
+  const [y, mo, d] = r.date.split("-").map(Number);
+  if ([h, mnt, y, mo, d].some((n) => Number.isNaN(n))) return null;
+  const scheduled = new Date(y, mo - 1, d, h, mnt).getTime();
+  const diffMin = Math.round((scheduled - Date.now()) / 60000);
+  const isToday = r.date === todayKey(0);
+  const isTomorrow = r.date === todayKey(1);
+
+  if (isToday) {
+    if (diffMin <= 15) {
+      return { label: diffMin <= 0 ? "Tout de suite" : `Dans ${diffMin} min`, bg: "#E5484D", color: "#fff", pulse: true };
+    }
+    if (diffMin <= 60) {
+      return { label: `Dans ${diffMin} min · ${r.heure}`, bg: "#FFB43A", color: "#1A1206", pulse: false };
+    }
+    return { label: `Aujourd'hui à ${r.heure}`, bg: "#2A2F36", color: "#E4E7EB", pulse: false };
+  }
+  if (isTomorrow) {
+    return { label: `Demain à ${r.heure}`, bg: "#5B8DEF", color: "#fff", pulse: false };
+  }
+  const weekday = FRENCH_WEEKDAYS_SHORT[new Date(y, mo - 1, d).getDay()];
+  return { label: `${weekday} ${formatDayMonth(r.date)} à ${r.heure}`, bg: "#5B8DEF", color: "#fff", pulse: false };
+}
+
 // Plage lundi→dimanche de la semaine en cours, pour le filtre "Cette semaine".
 function thisWeekRange() {
   const now = new Date();
@@ -3048,6 +3080,7 @@ export default function App() {
             const iAmPriority = priorityDrivers.some((d) => d.name === driverName);
             const isPriorityLocked =
               r.status === "disponible" && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
+            const timing = rideTimingBadge(r);
 
             return (
               <div
@@ -3082,6 +3115,15 @@ export default function App() {
                       : `Prise par ${r.takenBy}`}
                   </span>
                 </div>
+
+                {timing && (
+                  <div
+                    className={timing.pulse ? "rp-beacon-pulse" : undefined}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, fontSize: 12.5, fontWeight: 800, background: timing.bg, color: timing.color, marginBottom: 10 }}
+                  >
+                    <Clock size={12} /> {timing.label}
+                  </div>
+                )}
 
                 {r.photo && <img src={r.photo} alt="Bon de transport" style={styles.cardThumb} />}
 
@@ -3231,6 +3273,7 @@ export default function App() {
         const isPriorityLocked =
           r.status === "disponible" && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
         const dist = myPos ? distanceKm(myPos, ridePickupCoords(r)) : null;
+        const timing = rideTimingBadge(r);
         return (
           <div style={styles.modalOverlay} onClick={() => setSelectedRide(null)}>
             <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
@@ -3243,6 +3286,15 @@ export default function App() {
                   <X size={16} />
                 </button>
               </div>
+
+              {timing && (
+                <div
+                  className={timing.pulse ? "rp-beacon-pulse" : undefined}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 20, fontSize: 13, fontWeight: 800, background: timing.bg, color: timing.color, marginBottom: 12 }}
+                >
+                  <Clock size={13} /> {timing.label}
+                </div>
+              )}
 
               {r.urgent && (
                 <div className="rp-beacon-pulse" style={{ ...styles.urgentBadge, position: "static", display: "inline-flex", marginBottom: 12 }}>
