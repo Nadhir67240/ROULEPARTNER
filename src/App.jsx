@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
-  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, MessageCircle, Home,
+  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, ChevronRight, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
   FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil, CalendarPlus, CalendarCheck,
   Users, LayoutDashboard, LifeBuoy, Mail,
@@ -1997,6 +1997,13 @@ export default function App() {
     return { ride: r, gapInfo };
   });
 
+  // Course(s) que ce chauffeur a en ce moment (prise ou en cours) — affichées
+  // en raccourci permanent en haut de l'écran, quel que soit l'onglet/filtre
+  // actif, pour ne pas avoir à la rechercher dans une longue liste.
+  const myActiveRides = rides
+    .filter((r) => r.takenBy === driverName && (r.status === "prise" || r.status === "en_cours"))
+    .sort((a, b) => (a.status === b.status ? 0 : a.status === "en_cours" ? -1 : 1));
+
   const visibleRides = rides
     .filter((r) => {
       if (dateFilter === "week") {
@@ -2424,6 +2431,33 @@ export default function App() {
           <ChevronDown size={13} />
         </button>
       </div>
+
+      {myActiveRides.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 24px 14px" }}>
+          {myActiveRides.map((r) => (
+            <div
+              key={r.id}
+              onClick={() => setSelectedRide(r)}
+              style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12,
+                cursor: "pointer", background: r.status === "en_cours" ? "rgba(255,180,58,0.14)" : "rgba(59,208,122,0.12)",
+                border: `1px solid ${r.status === "en_cours" ? "#FFB43A" : "#3BD07A"}`,
+              }}
+            >
+              <Car size={18} color={r.status === "en_cours" ? "#FFB43A" : "#3BD07A"} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.2, color: r.status === "en_cours" ? "#FFB43A" : "#3BD07A" }}>
+                  {r.status === "en_cours" ? "COURSE EN COURS" : "TA COURSE À PRENDRE EN CHARGE"}
+                </div>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {cardLocality(r.depart)} → {cardLocality(r.arrivee)}
+                </div>
+              </div>
+              <ChevronRight size={18} color="#8A9099" />
+            </div>
+          ))}
+        </div>
+      )}
 
       {showFilterMenu && (
         <div style={styles.modalOverlay} onClick={() => setShowFilterMenu(false)}>
