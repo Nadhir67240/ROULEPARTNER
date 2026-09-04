@@ -3521,14 +3521,14 @@ export default function App() {
         </button>
         {/* Emplacement réservé au bouton + flottant, pour qu'il ne recouvre aucun onglet. */}
         <div style={styles.bottomNavFabSlot} aria-hidden="true" />
-        <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, position: "relative" }}>
+        <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, color: "#8A9099", position: "relative" }}>
           <MessageCircle size={22} />
           {totalUnreadMessages > 0 && (
             <span style={styles.navBadge}>{totalUnreadMessages > 9 ? "9+" : totalUnreadMessages}</span>
           )}
           <span style={styles.bottomNavLabel}>Messages</span>
         </button>
-        <button onClick={() => setShowAccountPanel(true)} style={styles.bottomNavBtn}>
+        <button onClick={() => setShowAccountPanel(true)} style={{ ...styles.bottomNavBtn, color: "#8A9099" }}>
           <User size={22} />
           <span style={styles.bottomNavLabel}>Compte</span>
         </button>
