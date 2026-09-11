@@ -3170,14 +3170,15 @@ export default function App() {
                     <span style={{ fontWeight: 700, color: "#FFB43A" }}>{r.heure}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 8, flexShrink: 0, padding: "4px 0" }}>
                         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                        <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7" }}>{r.depart}</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <span style={{ flex: 1, width: 2, minHeight: 16, background: "#3A4048", margin: "3px 0", borderRadius: 1 }} />
                         <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
-                        <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6" }}>{r.arrivee}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14, minWidth: 0, flex: 1 }}>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.depart}</span>
+                        <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.arrivee}</span>
                       </div>
                     </div>
                     {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
@@ -3279,14 +3280,15 @@ export default function App() {
                 {r.photo && <img src={r.photo} alt="Bon de transport" style={styles.cardThumb} />}
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 8, flexShrink: 0, padding: "4px 0" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                      <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7" }}>{cardLocality(r.depart)}</span>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <span style={{ flex: 1, width: 2, minHeight: 16, background: "#3A4048", margin: "3px 0", borderRadius: 1 }} />
                       <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
-                      <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6" }}>{cardLocality(r.arrivee)}</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14, minWidth: 0, flex: 1 }}>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.depart)}</span>
+                      <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
                     </div>
                   </div>
                   {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
