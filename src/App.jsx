@@ -2895,8 +2895,8 @@ export default function App() {
                   <p style={styles.wizardSubtitle}>Renseigne le patient et les pièces jointes si besoin.</p>
 
                   <label style={styles.formLabel}>
-                    Initiales patient (optionnel)
-                    <input style={styles.input} placeholder="Ex: J.D." value={form.patient}
+                    Nom de la personne transportée (optionnel)
+                    <input style={styles.input} placeholder="Ex: Jean Dupont" value={form.patient}
                       onChange={(e) => setForm({ ...form, patient: e.target.value })} />
                   </label>
                   <label style={{ ...styles.formLabel, marginTop: 14 }}>
