@@ -3251,8 +3251,15 @@ export default function App() {
       <main style={styles.board}>
         {visibleRides.length === 0 ? (
           <div style={styles.emptyState}>
-            <div style={styles.emptyIcon}>
-              <Car size={32} color="#3A4048" />
+            <div style={{ ...styles.emptyIcon, position: "relative", background: filter === "dispo" ? "rgba(59,208,122,0.08)" : "#23272E" }}>
+              {filter === "dispo" && (
+                <>
+                  <span className="rp-radar-ring" />
+                  <span className="rp-radar-ring" />
+                  <span className="rp-radar-ring" />
+                </>
+              )}
+              <Car size={32} color={filter === "dispo" ? "#3BD07A" : "#3A4048"} style={{ position: "relative" }} />
             </div>
             <p style={styles.emptyTitle}>
               {filter === "dispo" ? "Aucune course disponible pour l'instant" : "Rien à afficher ici"}

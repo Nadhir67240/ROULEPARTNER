@@ -55,6 +55,22 @@ body {
   animation: rp-beacon-pulse 1.1s ease-in-out infinite;
 }
 
+/* Anneaux de radar qui se propagent depuis l'icône "aucune course disponible",
+   pour montrer que l'appli cherche activement plutôt que d'afficher un écran figé. */
+@keyframes rp-radar-ping {
+  0% { transform: scale(0.6); opacity: 0.55; }
+  100% { transform: scale(2.3); opacity: 0; }
+}
+.rp-radar-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--positive);
+  animation: rp-radar-ping 2.4s ease-out infinite;
+}
+.rp-radar-ring:nth-child(2) { animation-delay: 0.8s; }
+.rp-radar-ring:nth-child(3) { animation-delay: 1.6s; }
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
