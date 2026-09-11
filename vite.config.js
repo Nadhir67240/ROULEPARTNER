@@ -7,6 +7,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      // On enregistre le service worker nous-mêmes dans main.jsx (virtual:pwa-register)
+      // pour qu'une mise à jour détectée recharge automatiquement l'app — sans ça, une
+      // PWA déjà installée peut rester bloquée sur un ancien build en cache.
+      injectRegister: false,
       includeAssets: ["icon-192.png", "icon-512.png"],
       manifest: {
         name: "RoulePartner",
