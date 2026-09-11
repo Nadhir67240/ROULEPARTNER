@@ -3010,14 +3010,15 @@ export default function App() {
                       </span>
                       <span style={{ fontSize: 12, color: "#8A9099" }}>{trajetLabel(form.trajet)}</span>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                        <span style={{ fontWeight: 700, fontSize: 14.5, color: "#F2F4F7" }}>{form.depart || "—"}</span>
+                    <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 10, flexShrink: 0, padding: "5px 0" }}>
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                        <span style={{ flex: 1, width: 2, minHeight: 20, background: "#3A4048", margin: "4px 0", borderRadius: 1 }} />
+                        <span style={{ width: 10, height: 10, borderRadius: 3, background: "#7C838C", flexShrink: 0 }} />
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
-                        <span style={{ fontWeight: 600, fontSize: 14.5, color: "#B8BEC6" }}>{form.arrivee || "—"}</span>
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 18, flex: 1, minWidth: 0 }}>
+                        <span style={{ fontWeight: 700, fontSize: 16.5, color: "#F2F4F7" }}>{form.depart || "—"}</span>
+                        <span style={{ fontWeight: 600, fontSize: 16.5, color: "#B8BEC6" }}>{form.arrivee || "—"}</span>
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: "#8A9099", marginBottom: 14 }}>
