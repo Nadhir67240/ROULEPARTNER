@@ -2664,30 +2664,31 @@ export default function App() {
                 <>
                   <h2 style={styles.wizardTitle}>Quel type de course ?</h2>
                   <p style={styles.wizardSubtitle}>Choisis la catégorie, puis renseigne le trajet.</p>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 26 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 22 }}>
                     {TYPES.map((t) => (
                       <button
                         type="button"
                         key={t.id}
                         onClick={() => setForm({ ...form, type: t.id })}
                         style={{
-                          display: "flex", flexDirection: "column", gap: 12,
+                          display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
                           background: form.type === t.id ? tintBg(t.color, 0.12) : "#191C21",
                           border: `1.5px solid ${form.type === t.id ? t.color : "#23272E"}`,
-                          borderRadius: 14, padding: "16px 14px", cursor: "pointer", textAlign: "left", minHeight: 104,
+                          borderRadius: 11, padding: "8px 4px", cursor: "pointer", textAlign: "center", minHeight: 64,
+                          position: "relative",
                         }}
                       >
+                        {form.type === t.id && (
+                          <Check size={11} color={t.color} style={{ position: "absolute", top: 5, right: 5 }} />
+                        )}
                         <span style={{
-                          width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                          width: 24, height: 24, borderRadius: 7, flexShrink: 0,
                           background: tintBg(t.color, 0.15),
                           display: "flex", alignItems: "center", justifyContent: "center",
                         }}>
-                          <t.icon size={18} color={t.color} />
+                          <t.icon size={13} color={t.color} />
                         </span>
-                        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                          <span style={{ fontSize: 14.5, fontWeight: 700, color: "#F2F4F7" }}>{t.label}</span>
-                          {form.type === t.id && <Check size={16} color={t.color} />}
-                        </span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#F2F4F7", lineHeight: 1.2 }}>{t.label}</span>
                       </button>
                     ))}
                   </div>
@@ -2695,10 +2696,10 @@ export default function App() {
                   <div style={styles.formLabel}>Trajet</div>
                   <div style={styles.routeCard}>
                     <div style={{ position: "relative" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px", borderBottom: "1px solid #23272E" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 46px 20px 16px", borderBottom: "1px solid #23272E" }}>
+                        <span style={{ width: 11, height: 11, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
                         <input
-                          style={styles.routeRowInput}
+                          style={{ ...styles.routeRowInput, fontSize: 17.5, fontWeight: 700 }}
                           placeholder="Adresse de départ"
                           value={form.depart}
                           onChange={(e) => {
@@ -2747,10 +2748,10 @@ export default function App() {
                       )}
                     </div>
                     <div style={{ position: "relative" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 46px 20px 16px" }}>
+                        <span style={{ width: 11, height: 11, borderRadius: 3, background: "#7C838C", flexShrink: 0 }} />
                         <input
-                          style={styles.routeRowInput}
+                          style={{ ...styles.routeRowInput, fontSize: 17.5, fontWeight: 700 }}
                           placeholder="Adresse d'arrivée"
                           value={form.arrivee}
                           onChange={(e) => {
