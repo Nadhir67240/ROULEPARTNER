@@ -833,6 +833,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef(null);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
+  const [showMyCoursesPanel, setShowMyCoursesPanel] = useState(false);
 
   const markRideRead = (rideId) => {
     setLastReadByRide((prev) => {
@@ -2035,7 +2036,6 @@ export default function App() {
         return false;
       }
       if (filter === "dispo") return r.status === "disponible";
-      if (filter === "mine") return r.postedBy === driverName || r.takenBy === driverName || r.pendingBy === driverName;
       if (filter === "recues") return r.takenBy === driverName && r.postedBy !== driverName;
       if (filter === "donnees") return r.postedBy === driverName;
       if (filter === "historique") return r.status === "terminee";
@@ -2241,6 +2241,55 @@ export default function App() {
     { id: "toutes", label: "Toutes", icon: List },
   ];
   const activeViewTab = viewTabs.find((t) => t.id === filter);
+
+  // Carte compacte utilisée dans la page "Mes courses" (prises ET données) — ouvre la fiche
+  // détaillée existante au clic plutôt que de dupliquer toutes ses actions ici.
+  const renderMyCourseCard = (r) => {
+    const meta = typeMeta(r.type);
+    return (
+      <div
+        key={r.id}
+        style={{ ...styles.card, cursor: "pointer" }}
+        onClick={() => { setSelectedRide(r); setShowMyCoursesPanel(false); }}
+      >
+        <div style={styles.cardHeader}>
+          <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
+            <meta.icon size={12} style={{ marginRight: 4 }} />
+            {meta.label}
+          </span>
+          <span
+            style={{
+              ...styles.statusTag,
+              color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
+            }}
+          >
+            {r.status === "disponible" ? "Disponible"
+              : r.status === "en_attente" ? "En attente"
+              : r.status === "en_cours" ? "En cours"
+              : r.status === "terminee" ? "Terminée"
+              : r.status}
+          </span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 8, flexShrink: 0, padding: "4px 0" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+              <span style={{ flex: 1, width: 2, minHeight: 16, background: "#3A4048", margin: "3px 0", borderRadius: 1 }} />
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14, minWidth: 0, flex: 1 }}>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.depart)}</span>
+              <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
+            </div>
+          </div>
+          {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
+        </div>
+        <div style={styles.metaRow}>
+          <span style={styles.metaItem}><Clock size={13} /> {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={styles.page}>
@@ -3719,8 +3768,8 @@ export default function App() {
           <span style={styles.bottomNavLabel}>Accueil</span>
         </button>
         <button
-          onClick={() => setFilter("mine")}
-          style={{ ...styles.bottomNavBtn, color: filter === "mine" ? "#FFB43A" : "#8A9099" }}
+          onClick={() => setShowMyCoursesPanel(true)}
+          style={{ ...styles.bottomNavBtn, color: "#8A9099" }}
         >
           <Car size={22} />
           <span style={styles.bottomNavLabel}>Courses</span>
@@ -3763,29 +3812,28 @@ export default function App() {
       </button>
 
       {showAccountPanel && (
-        <div style={styles.modalOverlay} onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); }}>
-          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>
-                {accountSubPanel && (
-                  <button
-                    onClick={() => setAccountSubPanel(null)}
-                    style={{ ...styles.iconBtn, marginRight: 8 }}
-                  >
-                    ←
-                  </button>
-                )}
-                {accountSubPanel === "profile" ? "Modifier mon profil"
-                  : accountSubPanel === "settings" ? "Réglages"
-                  : accountSubPanel === "company" ? "Ma société"
-                  : accountSubPanel === "dashboard" ? "Tableau de bord"
-                  : accountSubPanel === "support" ? "Aide & réclamations"
-                  : driverName}
-              </h2>
-              <button onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); }} style={styles.iconBtn}>
-                <X size={16} />
+        <div style={styles.wizardOverlay}>
+          <div style={styles.fullPageHeader}>
+            {accountSubPanel ? (
+              <button onClick={() => setAccountSubPanel(null)} style={styles.wizardNavBtn} aria-label="Retour">
+                <ChevronLeft size={20} />
               </button>
-            </div>
+            ) : (
+              <span style={{ width: 38 }} />
+            )}
+            <h2 style={styles.fullPageTitle}>
+              {accountSubPanel === "profile" ? "Modifier mon profil"
+                : accountSubPanel === "settings" ? "Réglages"
+                : accountSubPanel === "company" ? "Ma société"
+                : accountSubPanel === "dashboard" ? "Tableau de bord"
+                : accountSubPanel === "support" ? "Aide & réclamations"
+                : driverName}
+            </h2>
+            <button onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); }} style={styles.wizardNavBtn} aria-label="Fermer">
+              <X size={20} />
+            </button>
+          </div>
+          <div style={styles.wizardBody}>
 
             {!accountSubPanel && (
               <>
@@ -4282,15 +4330,55 @@ export default function App() {
         </div>
       )}
 
-      {showMessagesPanel && (
-        <div style={styles.modalOverlay} onClick={() => setShowMessagesPanel(false)}>
-          <div style={{ ...styles.modalCard, maxWidth: 420, maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h2 style={{ ...styles.modalTitle, display: "flex", alignItems: "center", gap: 8 }}><MessageCircle size={18} /> Messages</h2>
-              <button onClick={() => setShowMessagesPanel(false)} style={styles.iconBtn}>
-                <X size={16} />
-              </button>
+      {showMyCoursesPanel && (
+        <div style={styles.wizardOverlay}>
+          <div style={styles.fullPageHeader}>
+            <span style={{ width: 38 }} />
+            <h2 style={styles.fullPageTitle}>Mes courses</h2>
+            <button onClick={() => setShowMyCoursesPanel(false)} style={styles.wizardNavBtn} aria-label="Fermer">
+              <X size={20} />
+            </button>
+          </div>
+          <div style={styles.wizardBody}>
+            <div style={styles.myCoursesSectionTitle}>
+              <Car size={13} /> Courses prises ({myTakenRides.length})
             </div>
+            {myTakenRides.length === 0 ? (
+              <p style={{ color: "#6E757E", fontSize: 13, marginBottom: 26 }}>
+                Aucune course prise pour l'instant — les courses que tu prends à d'autres chauffeurs apparaîtront ici.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 26 }}>
+                {myTakenRides.map((r) => renderMyCourseCard(r))}
+              </div>
+            )}
+
+            <div style={styles.myCoursesSectionTitle}>
+              <Send size={13} /> Courses données ({myPostedRides.length})
+            </div>
+            {myPostedRides.length === 0 ? (
+              <p style={{ color: "#6E757E", fontSize: 13 }}>
+                Aucune course donnée pour l'instant — les courses que tu postes toi-même apparaîtront ici.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {myPostedRides.map((r) => renderMyCourseCard(r))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showMessagesPanel && (
+        <div style={styles.wizardOverlay}>
+          <div style={styles.fullPageHeader}>
+            <span style={{ width: 38 }} />
+            <h2 style={{ ...styles.fullPageTitle, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><MessageCircle size={18} /> Messages</h2>
+            <button onClick={() => setShowMessagesPanel(false)} style={styles.wizardNavBtn} aria-label="Fermer">
+              <X size={20} />
+            </button>
+          </div>
+          <div style={styles.wizardBody}>
             {conversations.length === 0 ? (
               <p style={{ color: "#8A9099", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
                 Aucune conversation pour l'instant. Elles apparaissent ici dès qu'une course que tu as postée ou prise a un message.
@@ -4331,18 +4419,15 @@ export default function App() {
       )}
 
       {chatRideId && (
-        <div style={styles.modalOverlay} onClick={() => setChatRideId(null)}>
-          <div
-            style={{ ...styles.modalCard, display: "flex", flexDirection: "column", height: "70vh" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Discussion</h2>
-              <button onClick={() => setChatRideId(null)} style={styles.iconBtn}>
-                <X size={16} />
-              </button>
-            </div>
-            <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 4 }}>
+        <div style={styles.wizardOverlay}>
+          <div style={styles.fullPageHeader}>
+            <span style={{ width: 38 }} />
+            <h2 style={styles.fullPageTitle}>Discussion</h2>
+            <button onClick={() => setChatRideId(null)} style={styles.wizardNavBtn} aria-label="Fermer">
+              <X size={20} />
+            </button>
+          </div>
+          <div style={{ ...styles.wizardBody, display: "flex", flexDirection: "column", gap: 12 }}>
               {chatMessages.length === 0 && (
                 <p style={{ color: "#6E757E", fontSize: 13, textAlign: "center", marginTop: 20 }}>
                   Aucun message pour l'instant.
@@ -4392,7 +4477,6 @@ export default function App() {
                 <Send size={18} />
               </button>
             </div>
-          </div>
         </div>
       )}
     </div>
@@ -4493,6 +4577,16 @@ const styles = {
   wizardFooter: {
     display: "flex", gap: 10, padding: "14px 16px", borderTop: "1px solid #23272E",
     background: "#0F1114", flexShrink: 0,
+  },
+  fullPageHeader: {
+    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+    padding: "16px 16px", borderBottom: "1px solid #23272E", flexShrink: 0,
+  },
+  fullPageTitle: { fontSize: 17.5, fontWeight: 800, margin: 0, fontFamily: "'Manrope', sans-serif", flex: 1, textAlign: "center" },
+  myCoursesSectionTitle: {
+    display: "flex", alignItems: "center", gap: 8, fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 11.5, fontWeight: 800, color: "#8A9099", textTransform: "uppercase", letterSpacing: "0.10em",
+    margin: "0 0 12px",
   },
   formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
