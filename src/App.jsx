@@ -1038,11 +1038,11 @@ export default function App() {
   // (typiquement l'adresse de départ ou d'arrivée), la comparaison ci-dessous ne correspond
   // plus et le recalcul doit reprendre normalement.
   const editOriginalTarifInputs = useRef(null);
-  // Le pied de page du parcours réutilise la même position pour "Continuer" (étape 2) et
-  // "Publier" (étape 3) : un appui un peu long ou un double-tap machinal du chauffeur peut
-  // donc retomber sur "Publier" pile au moment où l'étape 3 apparaît, avant qu'il ait eu le
-  // temps de voir/remplir quoi que ce soit. On ignore une soumission trop rapide après ce
-  // passage à l'étape 3 pour laisser le temps de lire l'écran avant de pouvoir publier.
+  // Le pied de page du parcours réutilise la même position pour "Continuer" (étapes 1-3) et
+  // "Publier" (étape 4) : un appui un peu long ou un double-tap machinal du chauffeur peut
+  // donc retomber sur "Publier" pile au moment où l'étape 4 apparaît, avant qu'il ait eu le
+  // temps de voir/relire quoi que ce soit. On ignore une soumission trop rapide après ce
+  // passage à l'étape 4 pour laisser le temps de lire l'écran avant de pouvoir publier.
   const step3EnteredAtRef = useRef(0);
   const wizBodyRef = useRef(null);
   const [plannedIds, setPlannedIds] = useState(() => {
@@ -2642,9 +2642,9 @@ export default function App() {
                 {formStep === 1 ? <X size={20} /> : <ChevronLeft size={20} />}
               </button>
               <div style={{ flex: 1 }}>
-                <div style={styles.wizardStepLabel}>Étape {formStep}/3</div>
+                <div style={styles.wizardStepLabel}>Étape {formStep}/4</div>
                 <div style={styles.wizardStepDots}>
-                  {[1, 2, 3].map((s) => (
+                  {[1, 2, 3, 4].map((s) => (
                     <span key={s} style={{ ...styles.wizardStepDot, ...(s <= formStep ? styles.wizardStepDotActive : {}) }} />
                   ))}
                 </div>
@@ -2891,8 +2891,8 @@ export default function App() {
 
               {formStep === 3 && (
                 <>
-                  <h2 style={styles.wizardTitle}>Détails et confirmation</h2>
-                  <p style={styles.wizardSubtitle}>Renseigne le patient et vérifie le résumé avant de publier.</p>
+                  <h2 style={styles.wizardTitle}>Détails de la course</h2>
+                  <p style={styles.wizardSubtitle}>Renseigne le patient et les pièces jointes si besoin.</p>
 
                   <label style={styles.formLabel}>
                     Initiales patient (optionnel)
@@ -2994,9 +2994,13 @@ export default function App() {
                       </button>
                     </div>
                   )}
+                </>
+              )}
 
-                  <div style={styles.sectionDivider} />
-                  <div style={{ ...styles.sectionLabel, marginTop: 18 }}>Résumé de la course</div>
+              {formStep === 4 && (
+                <>
+                  <h2 style={styles.wizardTitle}>Résumé et confirmation</h2>
+                  <p style={styles.wizardSubtitle}>Vérifie les informations avant de publier.</p>
 
                   <div style={styles.wizardSummaryCard}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -3060,7 +3064,7 @@ export default function App() {
             </div>
 
             <div style={styles.wizardFooter}>
-              {formStep < 3 ? (
+              {formStep < 4 ? (
                 <>
                   <button
                     type="button"
@@ -3069,26 +3073,31 @@ export default function App() {
                   >
                     Annuler
                   </button>
-                  <button
-                    type="button"
-                    disabled={formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure}
-                    onClick={() => {
-                      const next = formStep + 1;
-                      if (next === 3) step3EnteredAtRef.current = Date.now();
-                      setFormStep(next);
-                    }}
-                    style={{
-                      ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center",
-                      opacity: (formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure) ? 0.5 : 1,
-                      cursor: (formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure) ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Continuer
-                  </button>
+                  {(() => {
+                    const isBlocked = formStep === 1 ? (!form.depart || !form.arrivee) : formStep === 2 ? !form.heure : false;
+                    return (
+                      <button
+                        type="button"
+                        disabled={isBlocked}
+                        onClick={() => {
+                          const next = formStep + 1;
+                          if (next === 4) step3EnteredAtRef.current = Date.now();
+                          setFormStep(next);
+                        }}
+                        style={{
+                          ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center",
+                          opacity: isBlocked ? 0.5 : 1,
+                          cursor: isBlocked ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Continuer
+                      </button>
+                    );
+                  })()}
                 </>
               ) : (
                 <>
-                  <button type="button" onClick={() => setFormStep(2)} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
+                  <button type="button" onClick={() => setFormStep(3)} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
                     Retour
                   </button>
                   <button type="submit" style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center" }}>
