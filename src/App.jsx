@@ -2596,7 +2596,18 @@ export default function App() {
 
       {showForm && (
         <div style={styles.wizardOverlay}>
-          <form onSubmit={handlePost} style={styles.wizardForm}>
+          <form
+            onSubmit={handlePost}
+            onKeyDown={(e) => {
+              // Empêche la soumission implicite du navigateur (touche Entrée, ou "OK"/"Terminé"
+              // du clavier mobile sur un champ heure/date) qui publierait la course en sautant
+              // les étapes suivantes du parcours — seul le bouton "Publier" doit soumettre.
+              if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+                e.preventDefault();
+              }
+            }}
+            style={styles.wizardForm}
+          >
             <div style={styles.wizardHeader}>
               <button
                 type="button"
