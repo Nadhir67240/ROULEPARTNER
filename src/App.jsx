@@ -3,7 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
-  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, ChevronRight, MessageCircle, Home,
+  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
   Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
   FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil, CalendarPlus, CalendarCheck,
   Users, LayoutDashboard, LifeBuoy, Mail,
@@ -20,9 +20,9 @@ import {
 
 const TYPES = [
   { id: "taxi", label: "Taxi conventionné", color: "#FFB43A", icon: Car },
+  { id: "taxi_payant", label: "Course payante", color: "#8FB3F5", icon: Euro },
   { id: "vsl", label: "VSL", color: "#3BD07A", icon: Car },
   { id: "ambulance", label: "Ambulance", color: "#E86E5E", icon: Stethoscope },
-  { id: "taxi_payant", label: "Course payante", color: "#8FB3F5", icon: Euro },
 ];
 
 const TRAJET_TYPES = [
@@ -895,7 +895,8 @@ export default function App() {
     localStorage.setItem("radius-filter", value);
   };
   const [showForm, setShowForm] = useState(false);
-  const [showMoreDetails, setShowMoreDetails] = useState(false);
+  const [formStep, setFormStep] = useState(1);
+  const [pickupMode, setPickupMode] = useState(null); // null | "now" | "time" | "datetime"
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [, setTick] = useState(0);
@@ -909,7 +910,6 @@ export default function App() {
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const [showTypeMenu, setShowTypeMenu] = useState(false);
   const [newRidesBadge, setNewRidesBadge] = useState(0);
   const filterRef = useRef("dispo");
   const [showCalendarMenu, setShowCalendarMenu] = useState(false);
@@ -1521,6 +1521,8 @@ export default function App() {
       setForm(emptyForm);
       setEditingId(null);
       setShowForm(false);
+      setFormStep(1);
+      setPickupMode(null);
     } catch (e) {
       setError("Échec de l'enregistrement (vérifie ta config Firebase).");
     }
@@ -1691,6 +1693,8 @@ export default function App() {
     });
     setEditingId(r.id);
     setShowForm(true);
+    setFormStep(1);
+    setPickupMode("datetime");
     setSelectedRide(null);
   };
 
@@ -1707,6 +1711,8 @@ export default function App() {
     });
     setEditingId(null);
     setShowForm(true);
+    setFormStep(1);
+    setPickupMode(null);
     setSelectedRide(null);
   };
 
@@ -2589,411 +2595,479 @@ export default function App() {
       )}
 
       {showForm && (
-        <form onSubmit={handlePost} style={styles.formCard}>
-          <div style={styles.formLabel}>Type de course</div>
-          <button
-            type="button"
-            onClick={() => setShowTypeMenu(true)}
-            style={{
-              display: "flex", alignItems: "center", gap: 12, width: "100%",
-              background: "#191C21", border: "1px solid #23272E", borderRadius: 12,
-              padding: "12px 14px", cursor: "pointer", textAlign: "left",
-            }}
-          >
-            <span style={{
-              width: 34, height: 34, borderRadius: 10, flexShrink: 0,
-              background: tintBg(typeMeta(form.type).color, 0.15),
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              {(() => { const Icon = typeMeta(form.type).icon; return <Icon size={17} color={typeMeta(form.type).color} />; })()}
-            </span>
-            <span style={{ flex: 1, fontSize: 15.5, fontWeight: 700, color: "#F2F4F7" }}>{typeMeta(form.type).label}</span>
-            <ChevronDown size={18} color="#8A9099" />
-          </button>
-          {showTypeMenu && (
-            <div style={styles.modalOverlay} onClick={() => setShowTypeMenu(false)}>
-              <div style={{ ...styles.modalCard, maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
-                <div style={styles.modalHeader}>
-                  <h2 style={styles.modalTitle}>Type de course</h2>
-                  <button type="button" onClick={() => setShowTypeMenu(false)} style={styles.iconBtn}>
-                    <X size={16} />
-                  </button>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {TYPES.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => { setForm({ ...form, type: t.id }); setShowTypeMenu(false); }}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 12, width: "100%",
-                        background: form.type === t.id ? tintBg(t.color, 0.12) : "#191C21",
-                        border: `1px solid ${form.type === t.id ? t.color : "#23272E"}`,
-                        borderRadius: 12, padding: "13px 14px", cursor: "pointer", textAlign: "left",
-                      }}
-                    >
-                      <span style={{
-                        width: 34, height: 34, borderRadius: 10, flexShrink: 0,
-                        background: tintBg(t.color, 0.15),
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
-                        <t.icon size={17} color={t.color} />
-                      </span>
-                      <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#F2F4F7" }}>{t.label}</span>
-                      {form.type === t.id && <Check size={18} color={t.color} />}
-                    </button>
+        <div style={styles.wizardOverlay}>
+          <form onSubmit={handlePost} style={styles.wizardForm}>
+            <div style={styles.wizardHeader}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (formStep === 1) {
+                    setShowForm(false);
+                    setEditingId(null);
+                    setForm(emptyForm);
+                    editOriginalTarifInputs.current = null;
+                  } else {
+                    setFormStep(formStep - 1);
+                  }
+                }}
+                style={styles.wizardNavBtn}
+                aria-label={formStep === 1 ? "Fermer" : "Étape précédente"}
+              >
+                {formStep === 1 ? <X size={20} /> : <ChevronLeft size={20} />}
+              </button>
+              <div style={{ flex: 1 }}>
+                <div style={styles.wizardStepLabel}>Étape {formStep}/3</div>
+                <div style={styles.wizardStepDots}>
+                  {[1, 2, 3].map((s) => (
+                    <span key={s} style={{ ...styles.wizardStepDot, ...(s <= formStep ? styles.wizardStepDotActive : {}) }} />
                   ))}
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; }}
+                style={styles.wizardNavBtn}
+                aria-label="Annuler"
+              >
+                <X size={20} />
+              </button>
             </div>
-          )}
-          <div style={styles.sectionDivider} />
-          <div style={styles.formGrid}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <div style={styles.formLabel}>Trajet</div>
-              <div style={styles.routeCard}>
-                <div style={{ position: "relative" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px", borderBottom: "1px solid #23272E" }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                    <input
-                      style={styles.routeRowInput}
-                      placeholder="Adresse de départ"
-                      value={form.depart}
-                      onChange={(e) => {
-                        setForm({ ...form, depart: e.target.value });
-                        setActiveField("depart");
-                        setSuggestionActiveIndex(-1);
-                        searchAddress(e.target.value, setDepartSuggestions);
-                      }}
-                      onFocus={() => { setActiveField("depart"); setSuggestionActiveIndex(-1); }}
-                      onBlur={() => setTimeout(() => setActiveField((f) => (f === "depart" ? null : f)), 120)}
-                      onKeyDown={(e) => handleAddressKeyDown("depart", e)}
-                      required
-                    />
+
+            <div style={styles.wizardBody}>
+              {formStep === 1 && (
+                <>
+                  <h2 style={styles.wizardTitle}>Quel type de course ?</h2>
+                  <p style={styles.wizardSubtitle}>Choisis la catégorie, puis renseigne le trajet.</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 26 }}>
+                    {TYPES.map((t) => (
+                      <button
+                        type="button"
+                        key={t.id}
+                        onClick={() => setForm({ ...form, type: t.id })}
+                        style={{
+                          display: "flex", flexDirection: "column", gap: 12,
+                          background: form.type === t.id ? tintBg(t.color, 0.12) : "#191C21",
+                          border: `1.5px solid ${form.type === t.id ? t.color : "#23272E"}`,
+                          borderRadius: 14, padding: "16px 14px", cursor: "pointer", textAlign: "left", minHeight: 104,
+                        }}
+                      >
+                        <span style={{
+                          width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                          background: tintBg(t.color, 0.15),
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>
+                          <t.icon size={18} color={t.color} />
+                        </span>
+                        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ fontSize: 14.5, fontWeight: 700, color: "#F2F4F7" }}>{t.label}</span>
+                          {form.type === t.id && <Check size={16} color={t.color} />}
+                        </span>
+                      </button>
+                    ))}
                   </div>
-                  {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
-                    <div style={styles.suggestionBox}>
-                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
-                    </div>
-                  )}
-                  {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
-                    <div style={styles.suggestionBox}>
-                      {form.depart.trim().length < 3 && (
-                        <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
-                          Adresses récentes
+
+                  <div style={styles.formLabel}>Trajet</div>
+                  <div style={styles.routeCard}>
+                    <div style={{ position: "relative" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px", borderBottom: "1px solid #23272E" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                        <input
+                          style={styles.routeRowInput}
+                          placeholder="Adresse de départ"
+                          value={form.depart}
+                          onChange={(e) => {
+                            setForm({ ...form, depart: e.target.value });
+                            setActiveField("depart");
+                            setSuggestionActiveIndex(-1);
+                            searchAddress(e.target.value, setDepartSuggestions);
+                          }}
+                          onFocus={() => { setActiveField("depart"); setSuggestionActiveIndex(-1); }}
+                          onBlur={() => setTimeout(() => setActiveField((f) => (f === "depart" ? null : f)), 120)}
+                          onKeyDown={(e) => handleAddressKeyDown("depart", e)}
+                          required
+                        />
+                      </div>
+                      {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
+                        <div style={styles.suggestionBox}>
+                          <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
                         </div>
                       )}
-                      {suggestionListFor("depart").map((s, i) => {
-                        const isRecent = !!s.recent;
-                        const label = isRecent ? s.address : shortAddress(s);
-                        const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
-                        const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
-                        return (
-                          <div
-                            key={isRecent ? `recent-${s.address}` : s.place_id}
-                            style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
-                            onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
-                            onMouseEnter={() => setSuggestionActiveIndex(i)}
-                          >
-                            <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                            <span style={{ flex: 1 }}>{label}</span>
-                            {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <div style={{ position: "relative" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px" }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
-                    <input
-                      style={styles.routeRowInput}
-                      placeholder="Adresse d'arrivée"
-                      value={form.arrivee}
-                      onChange={(e) => {
-                        setForm({ ...form, arrivee: e.target.value });
-                        setActiveField("arrivee");
-                        setSuggestionActiveIndex(-1);
-                        searchAddress(e.target.value, setArriveeSuggestions, debounceRefArrivee);
-                      }}
-                      onFocus={() => { setActiveField("arrivee"); setSuggestionActiveIndex(-1); }}
-                      onBlur={() => setTimeout(() => setActiveField((f) => (f === "arrivee" ? null : f)), 120)}
-                      onKeyDown={(e) => handleAddressKeyDown("arrivee", e)}
-                      required
-                    />
-                  </div>
-                  {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
-                    <div style={styles.suggestionBox}>
-                      <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
-                    </div>
-                  )}
-                  {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
-                    <div style={styles.suggestionBox}>
-                      {form.arrivee.trim().length < 3 && (
-                        <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
-                          Adresses récentes
+                      {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
+                        <div style={styles.suggestionBox}>
+                          {form.depart.trim().length < 3 && (
+                            <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
+                              Adresses récentes
+                            </div>
+                          )}
+                          {suggestionListFor("depart").map((s, i) => {
+                            const isRecent = !!s.recent;
+                            const label = isRecent ? s.address : shortAddress(s);
+                            const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
+                            const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
+                            return (
+                              <div
+                                key={isRecent ? `recent-${s.address}` : s.place_id}
+                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
+                                onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
+                                onMouseEnter={() => setSuggestionActiveIndex(i)}
+                              >
+                                <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+                                <span style={{ flex: 1 }}>{label}</span>
+                                {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
-                      {suggestionListFor("arrivee").map((s, i) => {
-                        const isRecent = !!s.recent;
-                        const label = isRecent ? s.address : shortAddress(s);
-                        const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
-                        const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
-                        return (
-                          <div
-                            key={isRecent ? `recent-${s.address}` : s.place_id}
-                            style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
-                            onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
-                            onMouseEnter={() => setSuggestionActiveIndex(i)}
-                          >
-                            <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                            <span style={{ flex: 1 }}>{label}</span>
-                            {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
-                          </div>
-                        );
-                      })}
                     </div>
+                    <div style={{ position: "relative" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 44px 13px 14px" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                        <input
+                          style={styles.routeRowInput}
+                          placeholder="Adresse d'arrivée"
+                          value={form.arrivee}
+                          onChange={(e) => {
+                            setForm({ ...form, arrivee: e.target.value });
+                            setActiveField("arrivee");
+                            setSuggestionActiveIndex(-1);
+                            searchAddress(e.target.value, setArriveeSuggestions, debounceRefArrivee);
+                          }}
+                          onFocus={() => { setActiveField("arrivee"); setSuggestionActiveIndex(-1); }}
+                          onBlur={() => setTimeout(() => setActiveField((f) => (f === "arrivee" ? null : f)), 120)}
+                          onKeyDown={(e) => handleAddressKeyDown("arrivee", e)}
+                          required
+                        />
+                      </div>
+                      {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
+                        <div style={styles.suggestionBox}>
+                          <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
+                        </div>
+                      )}
+                      {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
+                        <div style={styles.suggestionBox}>
+                          {form.arrivee.trim().length < 3 && (
+                            <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
+                              Adresses récentes
+                            </div>
+                          )}
+                          {suggestionListFor("arrivee").map((s, i) => {
+                            const isRecent = !!s.recent;
+                            const label = isRecent ? s.address : shortAddress(s);
+                            const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
+                            const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
+                            return (
+                              <div
+                                key={isRecent ? `recent-${s.address}` : s.place_id}
+                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
+                                onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
+                                onMouseEnter={() => setSuggestionActiveIndex(i)}
+                              >
+                                <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+                                <span style={{ flex: 1 }}>{label}</span>
+                                {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <button type="button" onClick={swapDepartArrivee} style={styles.swapBtn} aria-label="Inverser départ et arrivée" title="Inverser départ et arrivée">
+                      ⇅
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {formStep === 2 && (
+                <>
+                  <h2 style={styles.wizardTitle}>Aller, retour ou aller-retour ?</h2>
+                  <p style={styles.wizardSubtitle}>Précise ensuite quand a lieu la prise en charge.</p>
+
+                  <div style={{ ...styles.formRow, marginBottom: form.trajet === "allerRetour" ? 16 : 26 }}>
+                    {TRAJET_TYPES.map((t) => (
+                      <button
+                        type="button"
+                        key={t.id}
+                        onClick={() => setForm({ ...form, trajet: t.id })}
+                        style={{
+                          ...styles.typeChip, flex: 1,
+                          color: form.trajet === t.id ? "#1A1206" : "#B8BEC6",
+                          background: form.trajet === t.id ? "#FFB43A" : "#22262C",
+                        }}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  {form.trajet === "allerRetour" && (
+                    <label style={{ ...styles.formLabel, marginBottom: 26 }}>
+                      Heure de prise en charge retour (optionnel)
+                      <input style={styles.input} type="time" value={form.heureRetour}
+                        onChange={(e) => setForm({ ...form, heureRetour: e.target.value })} />
+                    </label>
                   )}
-                </div>
-                <button type="button" onClick={swapDepartArrivee} style={styles.swapBtn} aria-label="Inverser départ et arrivée" title="Inverser départ et arrivée">
-                  ⇅
-                </button>
-              </div>
-            </div>
-            <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8 }}>
-              {(() => {
-                const isNowActive = form.date === todayKey(0) && form.heure === timePlusMinutes(0);
-                const isPlus15Active = form.date === todayKey(0) && form.heure === timePlusMinutes(15);
-                return (
-                  <>
+
+                  <div style={styles.wizardSectionTitle}>Quand a lieu la prise en charge ?</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => { setPickupMode("now"); setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(0) }); }}
+                        style={{ ...styles.wizardModeBtn, ...(pickupMode === "now" ? styles.wizardModeBtnActive : {}) }}
+                      >
+                        Maintenant (patient prêt)
+                      </button>
+                      {pickupMode === "now" && (
+                        <p style={{ fontSize: 13, color: "#8A9099", margin: "8px 2px 0" }}>
+                          Prise en charge immédiate — {form.heure}.
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => { setPickupMode("time"); setForm((f) => ({ ...f, date: f.date || todayKey(0) })); }}
+                        style={{ ...styles.wizardModeBtn, ...(pickupMode === "time" ? styles.wizardModeBtnActive : {}) }}
+                      >
+                        Choisir l'heure
+                      </button>
+                      {pickupMode === "time" && (
+                        <input
+                          style={{ ...styles.input, width: "100%", marginTop: 10 }}
+                          type="time" value={form.heure}
+                          onChange={(e) => setForm({ ...form, heure: e.target.value })}
+                          required autoFocus
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setPickupMode("datetime")}
+                        style={{ ...styles.wizardModeBtn, ...(pickupMode === "datetime" ? styles.wizardModeBtnActive : {}) }}
+                      >
+                        Date et heure
+                      </button>
+                      {pickupMode === "datetime" && (
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <input style={{ ...styles.input, flex: 1 }} type="date" lang="fr-FR" value={form.date}
+                            onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+                          <input style={{ ...styles.input, flex: 1 }} type="time" value={form.heure}
+                            onChange={(e) => setForm({ ...form, heure: e.target.value })} required />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {formStep === 3 && (
+                <>
+                  <h2 style={styles.wizardTitle}>Détails et confirmation</h2>
+                  <p style={styles.wizardSubtitle}>Renseigne le patient et vérifie le résumé avant de publier.</p>
+
+                  <label style={styles.formLabel}>
+                    Initiales patient (optionnel)
+                    <input style={styles.input} placeholder="Ex: J.D." value={form.patient}
+                      onChange={(e) => setForm({ ...form, patient: e.target.value })} />
+                  </label>
+                  <label style={{ ...styles.formLabel, marginTop: 14 }}>
+                    Téléphone patient (optionnel)
+                    <input style={styles.input} placeholder="Ex: 06 12 34 56 78" value={form.patientTel}
+                      onChange={(e) => setForm({ ...form, patientTel: e.target.value })} />
+                  </label>
+                  <label style={{ ...styles.formLabel, marginTop: 14 }}>
+                    Notes
+                    <textarea style={{ ...styles.input, width: "100%", minHeight: 60 }}
+                      placeholder="Brancard, fauteuil roulant, code d'accès..." value={form.notes}
+                      onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+                  </label>
+
+                  <div style={{ ...styles.formRow, marginTop: 16 }}>
                     <button
                       type="button"
-                      onClick={() => setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(0) })}
+                      onClick={() => setForm({ ...form, urgent: !form.urgent })}
                       style={{
-                        ...styles.togglePill, flex: 1,
-                        borderColor: isNowActive ? "#FFB43A" : "#3A4048",
-                        background: isNowActive ? "#FFB43A" : "transparent",
-                        color: isNowActive ? "#1A1206" : "#B8BEC6",
-                        fontWeight: isNowActive ? 800 : 600,
+                        ...styles.togglePill,
+                        borderColor: form.urgent ? "#E5484D" : "#3A4048",
+                        color: form.urgent ? "#fff" : "#B8BEC6",
+                        background: form.urgent ? "#E5484D" : "transparent",
                       }}
                     >
-                      Maintenant
+                      <Siren size={17} /> Urgent
                     </button>
                     <button
                       type="button"
-                      onClick={() => setForm({ ...form, date: todayKey(0), heure: timePlusMinutes(15) })}
+                      onClick={() => setForm({ ...form, tpmr: !form.tpmr })}
                       style={{
-                        ...styles.togglePill, flex: 1,
-                        borderColor: isPlus15Active ? "#FFB43A" : "#3A4048",
-                        background: isPlus15Active ? "#FFB43A" : "transparent",
-                        color: isPlus15Active ? "#1A1206" : "#B8BEC6",
-                        fontWeight: isPlus15Active ? 800 : 600,
+                        ...styles.togglePill,
+                        borderColor: form.tpmr ? "#8FB3F5" : "#3A4048",
+                        color: form.tpmr ? "#fff" : "#B8BEC6",
+                        background: form.tpmr ? "#8FB3F5" : "transparent",
                       }}
                     >
-                      Dans 15 min
+                      TPMR
                     </button>
-                  </>
-                );
-              })()}
+                  </div>
+
+                  <div style={styles.sectionDivider} />
+                  <div style={{ ...styles.sectionLabel, marginTop: 18 }}>Pièces jointes</div>
+
+                  <label style={{ ...styles.formLabel, marginTop: 10 }}>
+                    Photo du bon de transport (optionnel)
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handlePhotoChange}
+                      style={{ display: "none" }}
+                    />
+                    <button type="button" onClick={() => photoInputRef.current?.click()} style={styles.btnGhost}>
+                      {form.photo ? "Changer la photo" : "Choisir une photo"}
+                    </button>
+                  </label>
+                  {form.photo && (
+                    <div style={{ position: "relative", display: "inline-block", marginTop: 8 }}>
+                      <img src={form.photo} alt="Bon de transport" style={styles.photoPreview} />
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, photo: null })}
+                        style={styles.photoRemoveBtn}
+                        title="Retirer la photo"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                  <label style={{ ...styles.formLabel, marginTop: 14 }}>
+                    Bon de transport en PDF (optionnel — visible seulement une fois la course prise)
+                    <input
+                      ref={documentInputRef}
+                      type="file"
+                      accept="application/pdf"
+                      onChange={handleDocumentChange}
+                      style={{ display: "none" }}
+                    />
+                    <button type="button" onClick={() => documentInputRef.current?.click()} style={styles.btnGhost}>
+                      {form.document ? "Changer le PDF" : "Joindre un PDF"}
+                    </button>
+                  </label>
+                  {form.document && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8A9099", marginTop: 8 }}>
+                      <FileText size={14} /> {form.documentName || "bon-de-transport.pdf"}
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, document: null, documentName: "" })}
+                        style={styles.iconBtn}
+                        title="Retirer le PDF"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )}
+
+                  <div style={styles.sectionDivider} />
+                  <div style={{ ...styles.sectionLabel, marginTop: 18 }}>Résumé de la course</div>
+
+                  <div style={styles.wizardSummaryCard}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                      <span style={{ ...styles.typeTag, background: tintBg(typeMeta(form.type).color, 0.12), color: typeMeta(form.type).color }}>
+                        {(() => { const Icon = typeMeta(form.type).icon; return <Icon size={12} style={{ marginRight: 4 }} />; })()}
+                        {typeMeta(form.type).label}
+                      </span>
+                      <span style={{ fontSize: 12, color: "#8A9099" }}>{trajetLabel(form.trajet)}</span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
+                        <span style={{ fontWeight: 700, fontSize: 14.5, color: "#F2F4F7" }}>{form.depart || "—"}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600, fontSize: 14.5, color: "#B8BEC6" }}>{form.arrivee || "—"}</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#8A9099", marginBottom: 14 }}>
+                      {formatRideDate(form.date)} à {form.heure || "—"}
+                      {form.trajet === "allerRetour" && form.heureRetour && ` · retour ${form.heureRetour}`}
+                    </div>
+
+                    {form.type === "taxi" ? (
+                      <>
+                        <label style={styles.checkboxRow}>
+                          <input type="checkbox" checked={form.majorationNuitWeekend}
+                            onChange={(e) => setForm({ ...form, majorationNuitWeekend: e.target.checked })} />
+                          Nuit/dimanche/férié (+50 %) — détecté automatiquement
+                        </label>
+                        <label style={{ ...styles.checkboxRow, marginTop: 8 }} title="Marseille, Paris, Nice, Toulouse, Lyon, Strasbourg, Montpellier, Rennes, Bordeaux, Lille, Grenoble, Nantes, départements 92/93/94, ou CMCO/Clinique du Ried (Schiltigheim) et UGECAM (Illkirch) — coche-la toi-même pour un autre établissement limitrophe non détecté">
+                          <input type="checkbox" checked={form.grandeVille}
+                            onChange={(e) => setForm({ ...form, grandeVille: e.target.checked })} />
+                          Forfait grande ville (+15 €) — détecté automatiquement
+                        </label>
+                        <label style={{ ...styles.checkboxRow, marginTop: 8 }} title="Hospitalisation, chimio, radiothérapie, dialyse... dont l'aller ou le retour se fait à vide">
+                          <input type="checkbox" checked={form.retourAVide}
+                            onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
+                          Retour à vide (hospitalisation/dialyse)
+                        </label>
+                        <div style={{ padding: 16, borderRadius: 14, background: "#22262C", display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 12 }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" }}>
+                            {calculatingTarif ? "…" : form.tarif ? `${form.tarif} €` : "—"}
+                          </span>
+                          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "#FFB43A" : "#8A9099" }}>
+                            {calculatingTarif ? "calcul en cours…" : "grille CPAM · calculé automatiquement"}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <label style={styles.formLabel}>
+                        Tarif estimé (€)
+                        <input style={{ ...styles.input, width: "100%" }} placeholder="Ex: 65" value={form.tarif}
+                          onChange={(e) => setForm({ ...form, tarif: e.target.value })} />
+                      </label>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-            <label style={styles.formLabel}>
-              Heure de prise en charge
-              <input style={styles.input} type="time" value={form.heure}
-                onChange={(e) => setForm({ ...form, heure: e.target.value })} required />
-            </label>
-            <label style={styles.formLabel}>
-              Date de la course
-              <input style={styles.input} type="date" lang="fr-FR" value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })} required />
-            </label>
-            {form.trajet === "allerRetour" && (
-              <label style={{ ...styles.formLabel, gridColumn: "1 / -1" }}>
-                Heure de prise en charge retour (optionnel)
-                <input style={styles.input} type="time" value={form.heureRetour}
-                  onChange={(e) => setForm({ ...form, heureRetour: e.target.value })} />
-              </label>
-            )}
-            {form.type === "taxi" ? (
-              <label style={{ ...styles.formLabel, gridColumn: "1 / -1" }}>
-                Tarif conventionné
-                <div style={{ padding: 16, borderRadius: 14, background: "#22262C", display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                  <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" }}>
-                    {calculatingTarif ? "…" : form.tarif ? `${form.tarif} €` : "—"}
-                  </span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "#FFB43A" : "#8A9099" }}>
-                    {calculatingTarif ? "calcul en cours…" : "grille CPAM · calculé automatiquement"}
-                  </span>
-                </div>
-              </label>
-            ) : (
-              <label style={styles.formLabel}>
-                Tarif estimé (€)
-                <input style={{ ...styles.input, width: "100%" }} placeholder="Ex: 65" value={form.tarif}
-                  onChange={(e) => setForm({ ...form, tarif: e.target.value })} />
-              </label>
-            )}
-            {form.type === "taxi" && (
-              <>
-                <label style={styles.checkboxRow}>
-                  <input type="checkbox" checked={form.majorationNuitWeekend}
-                    onChange={(e) => setForm({ ...form, majorationNuitWeekend: e.target.checked })} />
-                  Nuit/dimanche/férié (+50 %) — détecté automatiquement
-                </label>
-                <label style={styles.checkboxRow} title="Marseille, Paris, Nice, Toulouse, Lyon, Strasbourg, Montpellier, Rennes, Bordeaux, Lille, Grenoble, Nantes, départements 92/93/94, ou CMCO/Clinique du Ried (Schiltigheim) et UGECAM (Illkirch) — coche-la toi-même pour un autre établissement limitrophe non détecté">
-                  <input type="checkbox" checked={form.grandeVille}
-                    onChange={(e) => setForm({ ...form, grandeVille: e.target.checked })} />
-                  Forfait grande ville (+15 €) — détecté automatiquement
-                </label>
-                <label style={styles.checkboxRow} title="Hospitalisation, chimio, radiothérapie, dialyse... dont l'aller ou le retour se fait à vide">
-                  <input type="checkbox" checked={form.retourAVide}
-                    onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
-                  Retour à vide (hospitalisation/dialyse)
-                </label>
-              </>
-            )}
-            <div style={styles.formLabel}>
-              Trajet
-              <div style={styles.formRow}>
-                {TRAJET_TYPES.map((t) => (
+
+            <div style={styles.wizardFooter}>
+              {formStep < 3 ? (
+                <>
                   <button
                     type="button"
-                    key={t.id}
-                    onClick={() => setForm({ ...form, trajet: t.id })}
+                    onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; }}
+                    style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    disabled={formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure}
+                    onClick={() => setFormStep(formStep + 1)}
                     style={{
-                      ...styles.typeChip,
-                      color: form.trajet === t.id ? "#1A1206" : "#B8BEC6",
-                      background: form.trajet === t.id ? "#FFB43A" : "#22262C",
+                      ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center",
+                      opacity: (formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure) ? 0.5 : 1,
+                      cursor: (formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure) ? "not-allowed" : "pointer",
                     }}
                   >
-                    {t.label}
+                    Continuer
                   </button>
-                ))}
-              </div>
-            </div>
-            <div style={styles.formRow}>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, urgent: !form.urgent })}
-                style={{
-                  ...styles.togglePill,
-                  borderColor: form.urgent ? "#E5484D" : "#3A4048",
-                  color: form.urgent ? "#fff" : "#B8BEC6",
-                  background: form.urgent ? "#E5484D" : "transparent",
-                }}
-              >
-                <Siren size={17} /> Urgent
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, tpmr: !form.tpmr })}
-                style={{
-                  ...styles.togglePill,
-                  borderColor: form.tpmr ? "#8FB3F5" : "#3A4048",
-                  color: form.tpmr ? "#fff" : "#B8BEC6",
-                  background: form.tpmr ? "#8FB3F5" : "transparent",
-                }}
-              >
-                TPMR
-              </button>
-            </div>
-          </div>
-          <div style={styles.sectionDivider} />
-
-          <button
-            type="button"
-            onClick={() => setShowMoreDetails(!showMoreDetails)}
-            style={styles.collapsibleHeader}
-          >
-            Détails complémentaires (optionnel)
-            {showMoreDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-          {showMoreDetails && (
-            <>
-              <label style={styles.formLabel}>
-                Initiales patient (optionnel)
-                <input style={styles.input} placeholder="Ex: J.D." value={form.patient}
-                  onChange={(e) => setForm({ ...form, patient: e.target.value })} />
-              </label>
-              <label style={styles.formLabel}>
-                Téléphone patient (optionnel)
-                <input style={styles.input} placeholder="Ex: 06 12 34 56 78" value={form.patientTel}
-                  onChange={(e) => setForm({ ...form, patientTel: e.target.value })} />
-              </label>
-              <label style={styles.formLabel}>
-                Notes
-                <textarea style={{ ...styles.input, width: "100%", minHeight: 60 }}
-                  placeholder="Brancard, fauteuil roulant, code d'accès..." value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-              </label>
-              <label style={styles.formLabel}>
-                Photo du bon de transport (optionnel)
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handlePhotoChange}
-                  style={{ display: "none" }}
-                />
-                <button type="button" onClick={() => photoInputRef.current?.click()} style={styles.btnGhost}>
-                  {form.photo ? "Changer la photo" : "Choisir une photo"}
-                </button>
-              </label>
-              {form.photo && (
-                <div style={{ position: "relative", display: "inline-block" }}>
-                  <img src={form.photo} alt="Bon de transport" style={styles.photoPreview} />
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, photo: null })}
-                    style={styles.photoRemoveBtn}
-                    title="Retirer la photo"
-                  >
-                    <X size={14} />
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setFormStep(2)} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
+                    Retour
                   </button>
-                </div>
+                  <button type="submit" style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center" }}>
+                    {editingId ? "Enregistrer les modifications" : "Publier la course"}
+                  </button>
+                </>
               )}
-              <label style={styles.formLabel}>
-                Bon de transport en PDF (optionnel — visible seulement une fois la course prise)
-                <input
-                  ref={documentInputRef}
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleDocumentChange}
-                  style={{ display: "none" }}
-                />
-                <button type="button" onClick={() => documentInputRef.current?.click()} style={styles.btnGhost}>
-                  {form.document ? "Changer le PDF" : "Joindre un PDF"}
-                </button>
-              </label>
-              {form.document && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8A9099" }}>
-                  <FileText size={14} /> {form.documentName || "bon-de-transport.pdf"}
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, document: null, documentName: "" })}
-                    style={styles.iconBtn}
-                    title="Retirer le PDF"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-
-          <div style={{
-            display: "flex", gap: 10, position: "sticky", bottom: 0,
-            background: "#191C21", padding: "12px 0 2px", marginTop: 4,
-          }}>
-            <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); editOriginalTarifInputs.current = null; }} style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}>
-              Annuler
-            </button>
-            <button type="submit" style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center" }}>
-              {editingId ? "Enregistrer les modifications" : "Publier"}
-            </button>
-          </div>
-        </form>
+            </div>
+          </form>
+        </div>
       )}
 
       {filter === "carte" ? (
@@ -3630,6 +3704,8 @@ export default function App() {
             setEditingId(null);
             setForm(emptyForm);
             editOriginalTarifInputs.current = null;
+            setFormStep(1);
+            setPickupMode(null);
             setShowForm(true);
           }
         }}
@@ -4331,6 +4407,46 @@ const styles = {
   formCard: {
     margin: "0 24px 20px", background: "#1F1A12", border: "1px solid rgba(255,180,58,0.35)",
     borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14,
+  },
+  wizardOverlay: {
+    position: "fixed", inset: 0, background: "#0F1114", zIndex: 200,
+    display: "flex", flexDirection: "column",
+  },
+  wizardForm: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 },
+  wizardHeader: {
+    display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
+    borderBottom: "1px solid #23272E", flexShrink: 0,
+  },
+  wizardNavBtn: {
+    background: "#191C21", border: "1px solid #23272E", color: "#F2F4F7",
+    borderRadius: 10, width: 38, height: 38, display: "flex", alignItems: "center",
+    justifyContent: "center", cursor: "pointer", flexShrink: 0,
+  },
+  wizardStepLabel: {
+    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 800,
+    color: "#8A9099", textTransform: "uppercase", letterSpacing: "0.10em", marginBottom: 6,
+  },
+  wizardStepDots: { display: "flex", gap: 6 },
+  wizardStepDot: { height: 4, borderRadius: 2, flex: 1, background: "#23272E" },
+  wizardStepDotActive: { background: "#FFB43A" },
+  wizardBody: { flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 20px 28px" },
+  wizardTitle: { fontSize: 21, fontWeight: 800, margin: "0 0 4px", fontFamily: "'Manrope', sans-serif", letterSpacing: "-0.01em" },
+  wizardSubtitle: { fontSize: 13, color: "#8A9099", margin: "0 0 22px" },
+  wizardSectionTitle: {
+    fontFamily: "'Manrope', sans-serif", fontSize: 13, fontWeight: 700,
+    color: "#F2F4F7", margin: "0 0 12px",
+  },
+  wizardModeBtn: {
+    display: "flex", alignItems: "center", width: "100%", textAlign: "left",
+    background: "#191C21", border: "1.5px solid #23272E", color: "#B8BEC6",
+    padding: "14px 16px", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700,
+    minHeight: 52,
+  },
+  wizardModeBtnActive: { borderColor: "#FFB43A", background: "rgba(255,180,58,0.12)", color: "#F2F4F7" },
+  wizardSummaryCard: { background: "#191C21", border: "1px solid #23272E", borderRadius: 16, padding: 16 },
+  wizardFooter: {
+    display: "flex", gap: 10, padding: "14px 16px", borderTop: "1px solid #23272E",
+    background: "#0F1114", flexShrink: 0,
   },
   formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
   formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
