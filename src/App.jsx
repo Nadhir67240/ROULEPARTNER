@@ -2441,7 +2441,7 @@ export default function App() {
             <Car size={18} color="#1A1206" />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <h1 style={styles.title}>Roule<span style={{ color: "#3BD07A" }}>Partner</span></h1>
+            <h1 style={styles.title}>R<span style={{ color: "#3BD07A" }}>P</span></h1>
             <span style={styles.headerSubtitle}>
               {driverName}{profiles[driverName]?.commune ? ` · ${profiles[driverName].commune}` : ""}
             </span>
