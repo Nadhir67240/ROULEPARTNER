@@ -2630,18 +2630,6 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ margin: "0 24px 18px" }}>
-        <div style={styles.gainsCard}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={styles.gainsLabel}>Gains {earningsLabel}</span>
-            <span style={styles.gainsAmount}>{myEarnings.toFixed(2)} €</span>
-          </div>
-          <span style={styles.gainsCount}>
-            {myTakenRides.length} course{myTakenRides.length > 1 ? "s" : ""}<br />reprise{myTakenRides.length > 1 ? "s" : ""}
-          </span>
-        </div>
-      </div>
-
       {!myPos && (
         <div style={styles.hintBanner}>
           Mets-toi en service pour trier les courses par proximité et profiter
