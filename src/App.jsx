@@ -2664,31 +2664,31 @@ export default function App() {
                 <>
                   <h2 style={styles.wizardTitle}>Quel type de course ?</h2>
                   <p style={styles.wizardSubtitle}>Choisis la catégorie, puis renseigne le trajet.</p>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6, marginBottom: 22 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 24 }}>
                     {TYPES.map((t) => (
                       <button
                         type="button"
                         key={t.id}
                         onClick={() => setForm({ ...form, type: t.id })}
                         style={{
-                          display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+                          display: "flex", flexDirection: "column", alignItems: "center", gap: 7,
                           background: form.type === t.id ? tintBg(t.color, 0.12) : "#191C21",
                           border: `1.5px solid ${form.type === t.id ? t.color : "#23272E"}`,
-                          borderRadius: 11, padding: "8px 4px", cursor: "pointer", textAlign: "center", minHeight: 64,
+                          borderRadius: 13, padding: "12px 5px", cursor: "pointer", textAlign: "center", minHeight: 82,
                           position: "relative",
                         }}
                       >
                         {form.type === t.id && (
-                          <Check size={11} color={t.color} style={{ position: "absolute", top: 5, right: 5 }} />
+                          <Check size={13} color={t.color} style={{ position: "absolute", top: 6, right: 6 }} />
                         )}
                         <span style={{
-                          width: 24, height: 24, borderRadius: 7, flexShrink: 0,
+                          width: 32, height: 32, borderRadius: 9, flexShrink: 0,
                           background: tintBg(t.color, 0.15),
                           display: "flex", alignItems: "center", justifyContent: "center",
                         }}>
-                          <t.icon size={13} color={t.color} />
+                          <t.icon size={17} color={t.color} />
                         </span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: "#F2F4F7", lineHeight: 1.2 }}>{t.label}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "#F2F4F7", lineHeight: 1.2 }}>{t.label}</span>
                       </button>
                     ))}
                   </div>
