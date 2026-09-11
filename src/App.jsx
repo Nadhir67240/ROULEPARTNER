@@ -3043,10 +3043,12 @@ export default function App() {
                             onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
                           Retour à vide (hospitalisation/dialyse)
                         </label>
-                        <div style={{ padding: 16, borderRadius: 14, background: "#22262C", display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 12 }}>
-                          <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" }}>
+                        <div style={{ padding: "18px 16px", borderRadius: 14, background: "#22262C", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 12 }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" }}>
                             {calculatingTarif ? "…" : form.tarif ? `${form.tarif} €` : "—"}
                           </span>
+                        </div>
+                        <div style={{ textAlign: "center", marginTop: 8 }}>
                           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "#FFB43A" : "#8A9099" }}>
                             {calculatingTarif ? "calcul en cours…" : "grille CPAM · calculé automatiquement"}
                           </span>
