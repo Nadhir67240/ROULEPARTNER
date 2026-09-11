@@ -2460,10 +2460,21 @@ export default function App() {
           <button
             onClick={sharePosition}
             aria-label="Basculer en service / hors service"
+            aria-pressed={myPosStatus === "ok"}
             style={{ ...styles.statusPill, ...(myPosStatus === "ok" ? styles.statusPillOn : styles.statusPillOff) }}
           >
-            <span style={{ ...styles.statusDot, background: myPosStatus === "ok" ? "#3BD07A" : "#6E757E" }} />
             {myPosStatus === "ok" ? "En service" : myPosStatus === "locating" ? "Localisation…" : "Hors service"}
+            <span style={{
+              position: "relative", width: 34, height: 20, borderRadius: 999, flexShrink: 0,
+              background: myPosStatus === "ok" ? "#3BD07A" : "#3A4048",
+              transition: "background 0.2s",
+            }}>
+              <span style={{
+                position: "absolute", top: 2, left: myPosStatus === "ok" ? 16 : 2,
+                width: 16, height: 16, borderRadius: "50%", background: "#fff",
+                transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+              }} />
+            </span>
           </button>
         </div>
       </header>
@@ -4508,7 +4519,6 @@ const styles = {
   },
   statusPillOn: { background: "rgba(59,208,122,0.10)", borderColor: "rgba(59,208,122,0.28)", color: "#3BD07A" },
   statusPillOff: { background: "#22262C", borderColor: "#2A2F36", color: "#8A9099" },
-  statusDot: { width: 7, height: 7, borderRadius: "50%", flexShrink: 0 },
   onlineDriversBadge: {
     display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 999,
     border: "1px solid rgba(255,180,58,0.28)", background: "rgba(255,180,58,0.10)", color: "#FFB43A",
