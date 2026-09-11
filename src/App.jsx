@@ -1038,6 +1038,13 @@ export default function App() {
   // (typiquement l'adresse de départ ou d'arrivée), la comparaison ci-dessous ne correspond
   // plus et le recalcul doit reprendre normalement.
   const editOriginalTarifInputs = useRef(null);
+  // Le pied de page du parcours réutilise la même position pour "Continuer" (étape 2) et
+  // "Publier" (étape 3) : un appui un peu long ou un double-tap machinal du chauffeur peut
+  // donc retomber sur "Publier" pile au moment où l'étape 3 apparaît, avant qu'il ait eu le
+  // temps de voir/remplir quoi que ce soit. On ignore une soumission trop rapide après ce
+  // passage à l'étape 3 pour laisser le temps de lire l'écran avant de pouvoir publier.
+  const step3EnteredAtRef = useRef(0);
+  const wizBodyRef = useRef(null);
   const [plannedIds, setPlannedIds] = useState(() => {
     try {
       return new Set(JSON.parse(localStorage.getItem("planned-rides") || "[]"));
@@ -1500,6 +1507,7 @@ export default function App() {
 
   const handlePost = async (e) => {
     e.preventDefault();
+    if (Date.now() - step3EnteredAtRef.current < 500) return;
     if (!form.depart || !form.arrivee || !form.heure) return;
     const myPos = positions[driverName] || null;
     try {
@@ -1527,6 +1535,13 @@ export default function App() {
       setError("Échec de l'enregistrement (vérifie ta config Firebase).");
     }
   };
+
+  // Remonte en haut du contenu à chaque changement d'étape du parcours, pour que le titre
+  // de la nouvelle étape soit toujours visible tout de suite (sans ça, si le chauffeur avait
+  // fait défiler l'étape précédente, la suivante pouvait s'afficher déjà scrollée).
+  useEffect(() => {
+    if (wizBodyRef.current) wizBodyRef.current.scrollTop = 0;
+  }, [formStep]);
 
   const swapDepartArrivee = () => {
     setForm((f) => ({
@@ -2644,7 +2659,7 @@ export default function App() {
               </button>
             </div>
 
-            <div style={styles.wizardBody}>
+            <div style={styles.wizardBody} ref={wizBodyRef}>
               {formStep === 1 && (
                 <>
                   <h2 style={styles.wizardTitle}>Quel type de course ?</h2>
@@ -3056,7 +3071,11 @@ export default function App() {
                   <button
                     type="button"
                     disabled={formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure}
-                    onClick={() => setFormStep(formStep + 1)}
+                    onClick={() => {
+                      const next = formStep + 1;
+                      if (next === 3) step3EnteredAtRef.current = Date.now();
+                      setFormStep(next);
+                    }}
                     style={{
                       ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center",
                       opacity: (formStep === 1 ? (!form.depart || !form.arrivee) : !form.heure) ? 0.5 : 1,
