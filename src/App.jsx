@@ -4,8 +4,8 @@ import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
-  Phone, Search, Calendar, List, Inbox, Map as MapIcon, History,
-  FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil, CalendarPlus, CalendarCheck,
+  Phone, Search, Calendar, List, Map as MapIcon, History,
+  FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
   Users, LayoutDashboard, LifeBuoy, Mail,
 } from "lucide-react";
 import {
@@ -1046,23 +1046,6 @@ export default function App() {
   // passage à l'étape 4 pour laisser le temps de lire l'écran avant de pouvoir publier.
   const step3EnteredAtRef = useRef(0);
   const wizBodyRef = useRef(null);
-  const [plannedIds, setPlannedIds] = useState(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem("planned-rides") || "[]"));
-    } catch (e) {
-      return new Set();
-    }
-  });
-
-  const togglePlanning = (id) => {
-    setPlannedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      localStorage.setItem("planned-rides", JSON.stringify([...next]));
-      return next;
-    });
-  };
   const knownRideIds = useRef(new Map()); // id -> dernier statut connu
   // L'écouteur Firestore est monté une seule fois : il ne "voit" pas les mises à
   // jour d'état React. On garde donc les positions dans un ref pour pouvoir
@@ -1991,34 +1974,6 @@ export default function App() {
   // Vitesse moyenne estimée pour convertir une distance à vol d'oiseau en temps de trajet.
   // C'est une approximation (pas un vrai calcul d'itinéraire routier) — prévoir une marge.
 
-  // Seules les courses ajoutées manuellement au planning apparaissent ici (aucun ajout automatique).
-  const planningRides = rides
-    .filter((r) => plannedIds.has(r.id))
-    .slice()
-    .sort((a, b) => a.heure.localeCompare(b.heure));
-
-  const planningSteps = planningRides.map((r, i) => {
-    const prev = planningRides[i - 1];
-    let gapInfo = null;
-    if (prev) {
-      const [ph, pm] = prev.heure.split(":").map(Number);
-      const [ch, cm] = r.heure.split(":").map(Number);
-      const gapMin = (ch * 60 + cm) - (ph * 60 + pm);
-      const hasCoords = prev.arriveeLat != null && r.departLat != null;
-      const distKm = hasCoords
-        ? distanceKm({ lat: prev.arriveeLat, lng: prev.arriveeLng }, { lat: r.departLat, lng: r.departLng })
-        : null;
-      const travelMin = distKm != null ? (distKm / AVG_SPEED_KMH) * 60 : null;
-      gapInfo = {
-        gapMin,
-        distKm,
-        travelMin,
-        tight: travelMin != null ? travelMin > gapMin - 5 : null,
-      };
-    }
-    return { ride: r, gapInfo };
-  });
-
   // Course(s) que ce chauffeur a en ce moment (prise ou en cours) — affichées
   // en raccourci permanent en haut de l'écran, quel que soit l'onglet/filtre
   // actif, pour ne pas avoir à la rechercher dans une longue liste.
@@ -2036,8 +1991,6 @@ export default function App() {
         return false;
       }
       if (filter === "dispo") return r.status === "disponible";
-      if (filter === "recues") return r.takenBy === driverName && r.postedBy !== driverName;
-      if (filter === "donnees") return r.postedBy === driverName;
       if (filter === "historique") return r.status === "terminee";
       return true;
     })
@@ -2233,10 +2186,7 @@ export default function App() {
   }
 
   const viewTabs = [
-    { id: "recues", label: "Reçues", icon: Inbox },
-    { id: "donnees", label: "Données", icon: Send },
     { id: "carte", label: "Carte", icon: MapIcon },
-    { id: "planning", label: "Planning", icon: Clock },
     { id: "historique", label: "Historique", icon: History },
     { id: "toutes", label: "Toutes", icon: List },
   ];
@@ -2482,24 +2432,25 @@ export default function App() {
         <div style={styles.hintBanner}>Position refusée — vérifie les réglages du navigateur pour recevoir les courses proches de toi.</div>
       )}
 
-      <div style={{ display: "flex", gap: 8, padding: "12px 24px 14px", alignItems: "center", overflowX: "auto" }}>
-        <button
-          onClick={() => setShowCalendarMenu(true)}
-          style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-        >
-          <Calendar size={13} /> {!dateFilter ? "Toutes les dates"
-            : dateFilter === "week" ? "Cette semaine"
-            : dateFilter === todayKey(0) ? "Aujourd'hui"
-            : dateFilter === todayKey(1) ? "Demain"
-            : formatDayMonth(dateFilter)}
-        </button>
-        <button
-          onClick={() => setShowFilterMenu(true)}
-          style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-        >
-          <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
-        </button>
-        <div style={{ width: 1, alignSelf: "stretch", background: "#23272E", flexShrink: 0 }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "12px 24px 14px" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", overflowX: "auto", minWidth: 0 }}>
+          <button
+            onClick={() => setShowCalendarMenu(true)}
+            style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+          >
+            <Calendar size={13} /> {!dateFilter ? "Toutes les dates"
+              : dateFilter === "week" ? "Cette semaine"
+              : dateFilter === todayKey(0) ? "Aujourd'hui"
+              : dateFilter === todayKey(1) ? "Demain"
+              : formatDayMonth(dateFilter)}
+          </button>
+          <button
+            onClick={() => setShowFilterMenu(true)}
+            style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+          >
+            <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
+          </button>
+        </div>
         <button
           onClick={() => setShowViewMenu(true)}
           style={{
@@ -3175,78 +3126,6 @@ export default function App() {
           </p>
           <div ref={mapContainerRef} style={styles.mapContainer} />
         </main>
-      ) : filter === "planning" ? (
-        <main style={{ padding: "0 24px" }}>
-          <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>
-            Les courses que tu as ajoutées toi-même à ton planning (bouton "Ajouter au planning" sur chaque
-            course), classées par heure. Les temps de trajet sont estimés à vol d'oiseau (~{AVG_SPEED_KMH} km/h
-            en moyenne) : prévois une marge, ce n'est pas un vrai calcul d'itinéraire routier.
-          </p>
-          {planningSteps.length === 0 ? (
-            <p style={styles.empty}>Aucune course dans ton planning pour l'instant. Ajoutes-en depuis les onglets Disponibles / Toutes / Mes courses.</p>
-          ) : (
-            planningSteps.map(({ ride: r, gapInfo }, i) => (
-              <div key={r.id}>
-                {gapInfo && (
-                  <div
-                    style={{
-                      ...styles.planningGap,
-                      borderColor: gapInfo.tight ? "#E5484D" : "#3A4048",
-                      color: gapInfo.tight ? "#E5484D" : "#6E757E",
-                    }}
-                  >
-                    {gapInfo.distKm != null ? (
-                      <>
-                        <Navigation size={12} style={{ marginRight: 6 }} />
-                        ~{gapInfo.distKm.toFixed(1)} km · ~{Math.round(gapInfo.travelMin)} min de route pour{" "}
-                        {gapInfo.gapMin} min disponibles
-                        {gapInfo.tight && " — risque de retard"}
-                      </>
-                    ) : (
-                      "Distance inconnue (adresse non géolocalisée précisément)"
-                    )}
-                  </div>
-                )}
-                <div
-                  style={{ ...styles.card, cursor: "pointer", marginBottom: 0 }}
-                  onClick={() => setSelectedRide(r)}
-                >
-                  <div style={styles.cardHeader}>
-                    <span style={{ ...styles.typeTag, background: tintBg(typeMeta(r.type).color, 0.12), color: typeMeta(r.type).color }}>
-                      {typeMeta(r.type).label}
-                    </span>
-                    <span style={{ fontWeight: 700, color: "#FFB43A" }}>{r.heure}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
-                    <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 8, flexShrink: 0, padding: "4px 0" }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                        <span style={{ flex: 1, width: 2, minHeight: 16, background: "#3A4048", margin: "3px 0", borderRadius: 1 }} />
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14, minWidth: 0, flex: 1 }}>
-                        <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.depart}</span>
-                        <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.arrivee}</span>
-                      </div>
-                    </div>
-                    {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
-                  </div>
-                  <div style={styles.metaRow}>
-                    <span style={styles.metaItem}>{trajetLabel(r.trajet)}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); togglePlanning(r.id); }}
-                      style={styles.btnGhost}
-                    >
-                      Retirer du planning
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </main>
       ) : (
       <main style={styles.board}>
         {visibleRides.length === 0 ? (
@@ -3722,16 +3601,6 @@ export default function App() {
                 )}
 
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  <button
-                    onClick={() => togglePlanning(r.id)}
-                    style={{
-                      ...styles.btnUtilityAction,
-                      ...(plannedIds.has(r.id) ? { color: "#FFB43A", borderColor: "#FFB43A" } : {}),
-                    }}
-                  >
-                    {plannedIds.has(r.id) ? <CalendarCheck size={14} /> : <CalendarPlus size={14} />}
-                    {plannedIds.has(r.id) ? "Planifié" : "Planning"}
-                  </button>
                   <button onClick={() => duplicateRide(r)} style={styles.btnUtilityAction}>
                     <Copy size={14} /> Dupliquer
                   </button>
@@ -4748,7 +4617,6 @@ const styles = {
   gainsLabel: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", color: "#8A9099", textTransform: "uppercase" },
   gainsAmount: { fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" },
   gainsCount: { fontSize: 13, fontWeight: 600, color: "#8A9099", textAlign: "right", lineHeight: 1.3 },
-  planningGap: { display: "flex", alignItems: "center", fontSize: 12, padding: "6px 12px", margin: "8px 0", border: "1px dashed #3A4048", borderRadius: 6 },
   errorBanner: { margin: "0 24px 16px", background: "#E5484D", padding: "10px 14px", borderRadius: 8, display: "flex", justifyContent: "space-between", fontSize: 13 },
   modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 100 },
   modalCard: { background: "#23272E", borderRadius: 14, padding: 24, maxWidth: 440, width: "100%", maxHeight: "85vh", overflowY: "auto", overflowX: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" },
