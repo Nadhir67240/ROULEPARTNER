@@ -3,10 +3,10 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
-  Stethoscope, X, Navigation, Timer, LogOut, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
-  Phone, Search, Calendar, List, Map as MapIcon, History,
+  Stethoscope, X, Navigation, Timer, LogOut, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
+  Phone, List, Map as MapIcon, History,
   FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
-  Users, LayoutDashboard, LifeBuoy, Mail,
+  Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
 } from "lucide-react";
 import {
   listenRides, addRide, updateRide, deleteRide, claimRide,
@@ -910,11 +910,10 @@ export default function App() {
   const [licenseChangeStatus, setLicenseChangeStatus] = useState(null); // null | { ok, text }
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [newRidesBadge, setNewRidesBadge] = useState(0);
   const filterRef = useRef("dispo");
-  const [showCalendarMenu, setShowCalendarMenu] = useState(false);
-  const [showViewMenu, setShowViewMenu] = useState(false);
   const [banTarget, setBanTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [banReason, setBanReason] = useState("");
@@ -2191,6 +2190,7 @@ export default function App() {
     { id: "toutes", label: "Toutes", icon: List },
   ];
   const activeViewTab = viewTabs.find((t) => t.id === filter);
+  const hasActiveFilters = !!dateFilter || radiusFilter !== "all" || !!activeViewTab;
 
   // Carte compacte utilisée dans la page "Mes courses" (prises ET données) — ouvre la fiche
   // détaillée existante au clic plutôt que de dupliquer toutes ses actions ici.
@@ -2432,35 +2432,21 @@ export default function App() {
         <div style={styles.hintBanner}>Position refusée — vérifie les réglages du navigateur pour recevoir les courses proches de toi.</div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "12px 24px 14px" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", overflowX: "auto", minWidth: 0 }}>
-          <button
-            onClick={() => setShowCalendarMenu(true)}
-            style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-          >
-            <Calendar size={13} /> {!dateFilter ? "Toutes les dates"
-              : dateFilter === "week" ? "Cette semaine"
-              : dateFilter === todayKey(0) ? "Aujourd'hui"
-              : dateFilter === todayKey(1) ? "Demain"
-              : formatDayMonth(dateFilter)}
-          </button>
-          <button
-            onClick={() => setShowFilterMenu(true)}
-            style={{ ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-          >
-            <Search size={13} /> Filtre {radiusFilter !== "all" && `(${radiusFilter} km)`}
-          </button>
-        </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, padding: "12px 24px 14px" }}>
         <button
-          onClick={() => setShowViewMenu(true)}
-          style={{
-            ...styles.tab, flexShrink: 0, display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-            ...(activeViewTab ? styles.tabActive : {}),
-          }}
+          onClick={() => setShowFiltersPanel(true)}
+          aria-label="Filtres"
+          style={{ ...styles.iconCircleBtn, ...(hasActiveFilters ? styles.iconCircleBtnActive : {}) }}
         >
-          {activeViewTab ? <activeViewTab.icon size={13} /> : <List size={13} />}
-          {activeViewTab ? activeViewTab.label : "Vues"}
-          <ChevronDown size={13} />
+          <Filter size={17} />
+          {hasActiveFilters && <span style={styles.iconCircleDot} />}
+        </button>
+        <button
+          onClick={() => setShowNotifPanel(true)}
+          aria-label="Notifications"
+          style={styles.iconCircleBtn}
+        >
+          <Bell size={17} />
         </button>
       </div>
 
@@ -2491,83 +2477,30 @@ export default function App() {
         </div>
       )}
 
-      {showFilterMenu && (
-        <div style={styles.modalOverlay} onClick={() => setShowFilterMenu(false)}>
-          <div style={{ ...styles.modalCard, maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+      {showFiltersPanel && (
+        <div style={styles.modalOverlay} onClick={() => setShowFiltersPanel(false)}>
+          <div style={{ ...styles.modalCard, maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Filtrer par rayon</h2>
-              <button onClick={() => setShowFilterMenu(false)} style={styles.iconBtn}><X size={16} /></button>
+              <h2 style={styles.modalTitle}>Filtres</h2>
+              <button onClick={() => setShowFiltersPanel(false)} style={styles.iconBtn}><X size={16} /></button>
             </div>
-            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 12 }}>
-              Ne montrer que les courses dans ce rayon autour de toi (nécessite d'être "en service").
-            </p>
-            {["15", "30", "50", "100", "all"].map((v) => (
-              <button
-                key={v}
-                onClick={() => { updateRadiusFilter(v); setShowFilterMenu(false); }}
-                style={{
-                  ...styles.togglePill, width: "100%", marginBottom: 8, justifyContent: "flex-start",
-                  borderColor: radiusFilter === v ? "#FFB43A" : "#3A4048",
-                  color: radiusFilter === v ? "#1A1206" : "#B8BEC6",
-                  background: radiusFilter === v ? "#FFB43A" : "transparent",
-                }}
-              >
-                {v === "all" ? "Toute distance" : `Rayon de ${v} km`}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {showViewMenu && (
-        <div style={styles.modalOverlay} onClick={() => setShowViewMenu(false)}>
-          <div style={{ ...styles.modalCard, maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Changer de vue</h2>
-              <button onClick={() => setShowViewMenu(false)} style={styles.iconBtn}><X size={16} /></button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {viewTabs.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => { setFilter(t.id); setShowViewMenu(false); }}
-                  style={{
-                    ...styles.togglePill, width: "100%", justifyContent: "flex-start", gap: 8,
-                    borderColor: filter === t.id ? "#FFB43A" : "#3A4048",
-                    color: filter === t.id ? "#1A1206" : "#B8BEC6",
-                    background: filter === t.id ? "#FFB43A" : "transparent",
-                  }}
-                >
-                  <t.icon size={14} /> {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showCalendarMenu && (
-        <div style={styles.modalOverlay} onClick={() => setShowCalendarMenu(false)}>
-          <div style={{ ...styles.modalCard, maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h2 style={styles.modalTitle}>Voir par date</h2>
-              <button onClick={() => setShowCalendarMenu(false)} style={styles.iconBtn}><X size={16} /></button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={styles.sectionLabel}>Date</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 }}>
               <button
-                onClick={() => { setDateFilter(dateFilter === todayKey(0) ? "" : todayKey(0)); setShowCalendarMenu(false); }}
+                onClick={() => setDateFilter(dateFilter === todayKey(0) ? "" : todayKey(0))}
                 style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(0) ? "#FFB43A" : "#3A4048", background: dateFilter === todayKey(0) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(0) ? "#1A1206" : "#B8BEC6" }}
               >
                 Aujourd'hui
               </button>
               <button
-                onClick={() => { setDateFilter(dateFilter === todayKey(1) ? "" : todayKey(1)); setShowCalendarMenu(false); }}
+                onClick={() => setDateFilter(dateFilter === todayKey(1) ? "" : todayKey(1))}
                 style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(1) ? "#FFB43A" : "#3A4048", background: dateFilter === todayKey(1) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(1) ? "#1A1206" : "#B8BEC6" }}
               >
                 Demain
               </button>
               <button
-                onClick={() => { setDateFilter(dateFilter === "week" ? "" : "week"); setShowCalendarMenu(false); }}
+                onClick={() => setDateFilter(dateFilter === "week" ? "" : "week")}
                 style={{ ...styles.togglePill, borderColor: dateFilter === "week" ? "#FFB43A" : "#3A4048", background: dateFilter === "week" ? "#FFB43A" : "transparent", color: dateFilter === "week" ? "#1A1206" : "#B8BEC6" }}
               >
                 Cette semaine
@@ -2583,11 +2516,66 @@ export default function App() {
                 />
               </label>
               {dateFilter && (
-                <button onClick={() => { setDateFilter(""); setShowCalendarMenu(false); }} style={styles.btnGhost}>
+                <button onClick={() => setDateFilter("")} style={styles.btnGhost}>
                   Effacer le filtre de date
                 </button>
               )}
             </div>
+
+            <div style={styles.sectionDivider} />
+            <div style={styles.sectionLabel}>Rayon</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 }}>
+              <p style={{ color: "#8A9099", fontSize: 12.5, margin: "0 0 2px" }}>
+                Ne montrer que les courses dans ce rayon autour de toi (nécessite d'être "en service").
+              </p>
+              {["15", "30", "50", "100", "all"].map((v) => (
+                <button
+                  key={v}
+                  onClick={() => updateRadiusFilter(v)}
+                  style={{
+                    ...styles.togglePill, width: "100%", justifyContent: "flex-start",
+                    borderColor: radiusFilter === v ? "#FFB43A" : "#3A4048",
+                    color: radiusFilter === v ? "#1A1206" : "#B8BEC6",
+                    background: radiusFilter === v ? "#FFB43A" : "transparent",
+                  }}
+                >
+                  {v === "all" ? "Toute distance" : `Rayon de ${v} km`}
+                </button>
+              ))}
+            </div>
+
+            <div style={styles.sectionDivider} />
+            <div style={styles.sectionLabel}>Vue</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {viewTabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setFilter(filter === t.id ? "dispo" : t.id)}
+                  style={{
+                    ...styles.togglePill, width: "100%", justifyContent: "flex-start", gap: 8,
+                    borderColor: filter === t.id ? "#FFB43A" : "#3A4048",
+                    color: filter === t.id ? "#1A1206" : "#B8BEC6",
+                    background: filter === t.id ? "#FFB43A" : "transparent",
+                  }}
+                >
+                  <t.icon size={14} /> {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNotifPanel && (
+        <div style={styles.modalOverlay} onClick={() => setShowNotifPanel(false)}>
+          <div style={{ ...styles.modalCard, maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h2 style={{ ...styles.modalTitle, display: "flex", alignItems: "center", gap: 8 }}><Bell size={18} /> Notifications</h2>
+              <button onClick={() => setShowNotifPanel(false)} style={styles.iconBtn}><X size={16} /></button>
+            </div>
+            <p style={{ color: "#8A9099", fontSize: 13.5, lineHeight: 1.5 }}>
+              Rien pour l'instant — cet espace accueillera bientôt les notifications de l'appli.
+            </p>
           </div>
         </div>
       )}
@@ -4402,6 +4390,16 @@ const styles = {
   },
   dateFilterRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   iconBtn: { background: "#23272E", border: "1px solid #3A4048", color: "#F2F4F7", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", alignItems: "center", fontSize: 12 },
+  iconCircleBtn: {
+    position: "relative", width: 38, height: 38, borderRadius: "50%",
+    background: "#191C21", border: "1px solid #3A4048", color: "#B8BEC6",
+    display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0,
+  },
+  iconCircleBtnActive: { borderColor: "#FFB43A", color: "#FFB43A", background: "rgba(255,180,58,0.10)" },
+  iconCircleDot: {
+    position: "absolute", top: 2, right: 2, width: 8, height: 8, borderRadius: "50%",
+    background: "#FFB43A", border: "2px solid #131519",
+  },
   tabs: { display: "flex", gap: 8, padding: "16px 24px", alignItems: "center", flexWrap: "wrap" },
   tab: { background: "transparent", border: "1px solid #3A4048", color: "#8A9099", padding: "8px 14px", borderRadius: 20, cursor: "pointer", fontSize: 13 },
   tabActive: { background: "#FFB43A", color: "#1A1206", borderColor: "#FFB43A", fontWeight: 600 },
