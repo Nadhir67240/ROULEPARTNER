@@ -2463,7 +2463,7 @@ export default function App() {
             aria-pressed={myPosStatus === "ok"}
             style={{ ...styles.statusPill, ...(myPosStatus === "ok" ? styles.statusPillOn : styles.statusPillOff) }}
           >
-            {myPosStatus === "ok" ? "En service" : myPosStatus === "locating" ? "Localisation…" : "Hors service"}
+            {myPosStatus === "ok" ? "ON" : myPosStatus === "locating" ? "Localisation…" : "OFF"}
             <span style={{
               position: "relative", width: 34, height: 20, borderRadius: 999, flexShrink: 0,
               background: myPosStatus === "ok" ? "#3BD07A" : "#3A4048",
