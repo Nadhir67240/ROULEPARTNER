@@ -2441,7 +2441,7 @@ export default function App() {
             <Car size={18} color="#1A1206" />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-            <h1 style={styles.title}>R<span style={{ color: "#3BD07A" }}>P</span></h1>
+            <h1 style={styles.title}>Roule<span style={{ color: "#3BD07A" }}>Partner</span></h1>
             <span style={styles.headerSubtitle}>
               {driverName}{profiles[driverName]?.commune ? ` · ${profiles[driverName].commune}` : ""}
             </span>
@@ -4518,7 +4518,7 @@ const styles = {
   gateTitle: { fontFamily: "'Manrope', sans-serif", fontSize: 30, letterSpacing: 0.5, fontWeight: 700, margin: 0 },
   gateSub: { color: "#8A9099", fontSize: 14, marginTop: 10, lineHeight: 1.5 },
   header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: "1px solid #23272E", position: "sticky", top: 0, background: "#131519", zIndex: 10, flexWrap: "nowrap", gap: 10 },
-  title: { fontFamily: "'Manrope', sans-serif", fontSize: 18, letterSpacing: "-0.01em", fontWeight: 800, margin: 0 },
+  title: { fontFamily: "'Manrope', sans-serif", fontSize: 18, letterSpacing: "-0.01em", fontWeight: 800, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   headerSubtitle: { fontSize: 12, fontWeight: 500, color: "#8A9099", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" },
   statusPill: {
     display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 999,
