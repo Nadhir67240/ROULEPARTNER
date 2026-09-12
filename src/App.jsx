@@ -2550,7 +2550,7 @@ export default function App() {
               {viewTabs.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => setFilter(filter === t.id ? "dispo" : t.id)}
+                  onClick={() => { setFilter(filter === t.id ? "dispo" : t.id); setShowFiltersPanel(false); }}
                   style={{
                     ...styles.togglePill, width: "100%", justifyContent: "flex-start", gap: 8,
                     borderColor: filter === t.id ? "#FFB43A" : "#3A4048",
