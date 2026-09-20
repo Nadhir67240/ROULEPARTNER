@@ -1,4 +1,5 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 
@@ -292,3 +293,37 @@ exports.notifyNewProfile = onDocumentCreated(
     });
   }
 );
+
+// Réservé à l'admin. Répare les profils dont le champ "email" est resté vide
+// (comptes créés avant que signUp() ne le sauvegarde) en le recopiant depuis
+// Firebase Auth, où il est toujours présent — la correspondance se fait sur
+// le nom affiché, identique à l'ID du document profil et au displayName Auth.
+exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) => {
+  if (request.auth?.token?.email !== ADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
+  }
+
+  const authEmailByName = new Map();
+  let pageToken;
+  do {
+    const page = await admin.auth().listUsers(1000, pageToken);
+    for (const u of page.users) {
+      if (u.displayName && u.email) authEmailByName.set(u.displayName, u.email);
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+
+  const profilesSnap = await db.collection("profiles").get();
+  const batch = db.batch();
+  let updated = 0;
+  for (const doc of profilesSnap.docs) {
+    if (doc.data().email) continue;
+    const email = authEmailByName.get(doc.id);
+    if (!email) continue;
+    batch.set(doc.ref, { email }, { merge: true });
+    updated += 1;
+  }
+  if (updated > 0) await batch.commit();
+
+  return { updated, checked: profilesSnap.size };
+});

@@ -30,6 +30,7 @@ import {
   verifyBeforeUpdateEmail,
 } from "firebase/auth";
 import { getMessaging, getToken, isSupported } from "firebase/messaging";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDdydh0RLrQ9wlityD-Zbpe69OcpXNTm7c",
@@ -51,6 +52,9 @@ export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 export const auth = getAuth(app);
+// Même région que setGlobalOptions() dans functions/index.js — sinon les appels
+// aux fonctions callable échouent silencieusement (mauvaise URL).
+const functions = getFunctions(app, "europe-west1");
 
 // Force une reprise de la synchronisation dès que l'appli redevient visible
 // (retour au premier plan après une longue veille) : on coupe puis on rouvre
@@ -265,6 +269,15 @@ export async function deleteDriverAccount(name) {
 export async function restoreDriverAccount(name) {
   const ref = doc(profilesCol, name);
   await setDoc(ref, { banned: false, deleted: false, bannedReason: "" }, { merge: true });
+}
+
+// Réservé à l'admin : complète les profils dont l'email n'a jamais été
+// enregistré (comptes créés avant que signUp() ne le sauvegarde), en le
+// recopiant depuis Firebase Auth via la fonction Cloud backfillProfileEmails.
+export async function backfillProfileEmails() {
+  const call = httpsCallable(functions, "backfillProfileEmails");
+  const res = await call();
+  return res.data;
 }
 
 // Clé publique VAPID générée dans Firebase Console > Paramètres > Cloud Messaging.

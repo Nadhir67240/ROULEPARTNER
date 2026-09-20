@@ -14,7 +14,7 @@ import {
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
-  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken,
+  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
 } from "./firebase";
 
@@ -910,6 +910,7 @@ export default function App() {
   const [licenseChangeStatus, setLicenseChangeStatus] = useState(null); // null | { ok, text }
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [emailRepairStatus, setEmailRepairStatus] = useState(null); // null | "loading" | { updated, checked } | { error }
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [newRidesBadge, setNewRidesBadge] = useState(0);
@@ -4039,6 +4040,30 @@ export default function App() {
               {allKnownDriverNames.length} chauffeur{allKnownDriverNames.length > 1 ? "s" : ""} connu{allKnownDriverNames.length > 1 ? "s" : ""}.
               Bannir un chauffeur le déconnecte immédiatement et l'empêche de se reconnecter.
             </p>
+            <div style={{ marginBottom: 16 }}>
+              <button
+                onClick={async () => {
+                  setEmailRepairStatus("loading");
+                  try {
+                    const res = await backfillProfileEmails();
+                    setEmailRepairStatus(res);
+                  } catch (e) {
+                    setEmailRepairStatus({ error: e.message || "Échec" });
+                  }
+                }}
+                disabled={emailRepairStatus === "loading"}
+                style={{ ...styles.btnGhost, fontSize: 12.5, padding: "8px 12px" }}
+              >
+                {emailRepairStatus === "loading" ? "Réparation en cours…" : "Réparer les emails manquants"}
+              </button>
+              {emailRepairStatus && emailRepairStatus !== "loading" && (
+                <p style={{ color: emailRepairStatus.error ? "#E5484D" : "#8A9099", fontSize: 12, marginTop: 6 }}>
+                  {emailRepairStatus.error
+                    ? `Erreur : ${emailRepairStatus.error}`
+                    : `${emailRepairStatus.updated} profil(s) complété(s) sur ${emailRepairStatus.checked} vérifié(s).`}
+                </p>
+              )}
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {allKnownDriverNames
                 .sort((a, b) => a.localeCompare(b))
