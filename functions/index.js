@@ -303,12 +303,18 @@ exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) =
     throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
   }
 
+  // Deux index : exact, et normalisé (espaces superflus / casse) en repli
+  // pour les comptes dont le nom a été saisi avec une variation mineure.
   const authEmailByName = new Map();
+  const authEmailByNormalizedName = new Map();
+  const normalize = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
   let pageToken;
   do {
     const page = await admin.auth().listUsers(1000, pageToken);
     for (const u of page.users) {
-      if (u.displayName && u.email) authEmailByName.set(u.displayName, u.email);
+      if (!u.displayName || !u.email) continue;
+      authEmailByName.set(u.displayName, u.email);
+      authEmailByNormalizedName.set(normalize(u.displayName), u.email);
     }
     pageToken = page.pageToken;
   } while (pageToken);
@@ -316,14 +322,18 @@ exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) =
   const profilesSnap = await db.collection("profiles").get();
   const batch = db.batch();
   let updated = 0;
+  const missing = [];
   for (const doc of profilesSnap.docs) {
     if (doc.data().email) continue;
-    const email = authEmailByName.get(doc.id);
-    if (!email) continue;
+    const email = authEmailByName.get(doc.id) || authEmailByNormalizedName.get(normalize(doc.id));
+    if (!email) {
+      missing.push(doc.id);
+      continue;
+    }
     batch.set(doc.ref, { email }, { merge: true });
     updated += 1;
   }
   if (updated > 0) await batch.commit();
 
-  return { updated, checked: profilesSnap.size };
+  return { updated, checked: profilesSnap.size, missing };
 });

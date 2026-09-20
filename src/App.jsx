@@ -4063,6 +4063,11 @@ export default function App() {
                     : `${emailRepairStatus.updated} profil(s) complété(s) sur ${emailRepairStatus.checked} vérifié(s).`}
                 </p>
               )}
+              {emailRepairStatus?.missing?.length > 0 && (
+                <p style={{ color: "#8A9099", fontSize: 12, marginTop: 4 }}>
+                  Toujours sans email (aucun compte Auth correspondant trouvé) : {emailRepairStatus.missing.join(", ")}
+                </p>
+              )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {allKnownDriverNames
