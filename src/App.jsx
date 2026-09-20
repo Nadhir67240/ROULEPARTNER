@@ -4060,7 +4060,7 @@ export default function App() {
                 <p style={{ color: emailRepairStatus.error ? "#E5484D" : "#8A9099", fontSize: 12, marginTop: 6 }}>
                   {emailRepairStatus.error
                     ? `Erreur : ${emailRepairStatus.error}`
-                    : `${emailRepairStatus.updated} profil(s) complété(s) sur ${emailRepairStatus.checked} vérifié(s).`}
+                    : `${emailRepairStatus.updated} profil(s) complété(s) sur ${emailRepairStatus.checked} vérifié(s). ${emailRepairStatus.authUserCount} compte(s) Firebase Auth trouvé(s).${emailRepairStatus.authError ? ` Erreur Auth : ${emailRepairStatus.authError}` : ""}`}
                 </p>
               )}
               {emailRepairStatus?.missing?.length > 0 && (

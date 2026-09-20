@@ -309,18 +309,23 @@ exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) =
   const authEmailByNormalizedName = new Map();
   const allAuthUsers = [];
   const normalize = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
-  let pageToken;
-  do {
-    const page = await admin.auth().listUsers(1000, pageToken);
-    for (const u of page.users) {
-      if (!u.email) continue;
-      allAuthUsers.push({ displayName: u.displayName || "", email: u.email });
-      if (!u.displayName) continue;
-      authEmailByName.set(u.displayName, u.email);
-      authEmailByNormalizedName.set(normalize(u.displayName), u.email);
-    }
-    pageToken = page.pageToken;
-  } while (pageToken);
+  let authError = null;
+  try {
+    let pageToken;
+    do {
+      const page = await admin.auth().listUsers(1000, pageToken);
+      for (const u of page.users) {
+        if (!u.email) continue;
+        allAuthUsers.push({ displayName: u.displayName || "", email: u.email });
+        if (!u.displayName) continue;
+        authEmailByName.set(u.displayName, u.email);
+        authEmailByNormalizedName.set(normalize(u.displayName), u.email);
+      }
+      pageToken = page.pageToken;
+    } while (pageToken);
+  } catch (e) {
+    authError = e.message || String(e);
+  }
 
   const profilesSnap = await db.collection("profiles").get();
   const batch = db.batch();
@@ -350,7 +355,7 @@ exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) =
       .map((u) => ({ displayName: u.displayName, email: u.email }));
   }
 
-  return { updated, checked: profilesSnap.size, missing, suggestions };
+  return { updated, checked: profilesSnap.size, missing, suggestions, authUserCount: allAuthUsers.length, authError };
 });
 
 // Réservé à l'admin. Associe manuellement un email Firebase Auth à un profil,
