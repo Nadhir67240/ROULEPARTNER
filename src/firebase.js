@@ -280,6 +280,14 @@ export async function backfillProfileEmails() {
   return res.data;
 }
 
+// Réservé à l'admin : associe manuellement un email Firebase Auth à un profil,
+// pour les cas que backfillProfileEmails ne peut pas résoudre automatiquement.
+export async function assignProfileEmail(name, email) {
+  const call = httpsCallable(functions, "assignProfileEmail");
+  const res = await call({ name, email });
+  return res.data;
+}
+
 // Clé publique VAPID générée dans Firebase Console > Paramètres > Cloud Messaging.
 const VAPID_KEY = "BJM083fCjLvVEZNnP2NmsQM146hHmdKNIpZTIMCFx9IXScg1qJH4gWFgiEUPdGqrL_skfBXpajgSiDnRF_D5Eks";
 

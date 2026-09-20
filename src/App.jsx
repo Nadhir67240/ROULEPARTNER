@@ -14,7 +14,7 @@ import {
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
-  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails,
+  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
 } from "./firebase";
 
@@ -4064,9 +4064,38 @@ export default function App() {
                 </p>
               )}
               {emailRepairStatus?.missing?.length > 0 && (
-                <p style={{ color: "#8A9099", fontSize: 12, marginTop: 4 }}>
-                  Toujours sans email (aucun compte Auth correspondant trouvé) : {emailRepairStatus.missing.join(", ")}
-                </p>
+                <div style={{ marginTop: 4 }}>
+                  <p style={{ color: "#8A9099", fontSize: 12, margin: "0 0 6px" }}>
+                    Toujours sans email — choisis le bon compte ci-dessous si tu le reconnais :
+                  </p>
+                  {emailRepairStatus.missing.map((name) => {
+                    const candidates = emailRepairStatus.suggestions?.[name] || [];
+                    return (
+                      <div key={name} style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700 }}>{name}</div>
+                        {candidates.length === 0 ? (
+                          <div style={{ fontSize: 11.5, color: "#6E757E" }}>Aucun compte Auth ressemblant trouvé.</div>
+                        ) : (
+                          candidates.map((c) => (
+                            <button
+                              key={c.email}
+                              onClick={async () => {
+                                await assignProfileEmail(name, c.email);
+                                setEmailRepairStatus((prev) => ({
+                                  ...prev,
+                                  missing: prev.missing.filter((n) => n !== name),
+                                }));
+                              }}
+                              style={{ ...styles.btnGhost, fontSize: 11.5, padding: "4px 8px", marginRight: 6, marginTop: 3 }}
+                            >
+                              {c.email}{c.displayName ? ` (${c.displayName})` : " (sans nom)"}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

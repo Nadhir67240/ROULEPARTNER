@@ -307,12 +307,15 @@ exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) =
   // pour les comptes dont le nom a été saisi avec une variation mineure.
   const authEmailByName = new Map();
   const authEmailByNormalizedName = new Map();
+  const allAuthUsers = [];
   const normalize = (s) => s.trim().toLowerCase().replace(/\s+/g, " ");
   let pageToken;
   do {
     const page = await admin.auth().listUsers(1000, pageToken);
     for (const u of page.users) {
-      if (!u.displayName || !u.email) continue;
+      if (!u.email) continue;
+      allAuthUsers.push({ displayName: u.displayName || "", email: u.email });
+      if (!u.displayName) continue;
       authEmailByName.set(u.displayName, u.email);
       authEmailByNormalizedName.set(normalize(u.displayName), u.email);
     }
@@ -335,5 +338,34 @@ exports.backfillProfileEmails = onCall({ timeoutSeconds: 60 }, async (request) =
   }
   if (updated > 0) await batch.commit();
 
-  return { updated, checked: profilesSnap.size, missing };
+  // Pour chaque profil non résolu, propose les comptes Auth dont le nom
+  // ressemble (sous-chaîne, sans accents ni casse) ou qui n'ont pas de nom
+  // affiché du tout — l'admin peut alors faire le lien manuellement.
+  const strip = (s) => normalize(s).normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const suggestions = {};
+  for (const name of missing) {
+    const target = strip(name);
+    suggestions[name] = allAuthUsers
+      .filter((u) => !u.displayName || strip(u.displayName).includes(target) || target.includes(strip(u.displayName)))
+      .map((u) => ({ displayName: u.displayName, email: u.email }));
+  }
+
+  return { updated, checked: profilesSnap.size, missing, suggestions };
+});
+
+// Réservé à l'admin. Associe manuellement un email Firebase Auth à un profil,
+// pour les cas que backfillProfileEmails ne peut pas résoudre tout seul
+// (compte Auth créé sans nom affiché, orthographe trop différente...).
+exports.assignProfileEmail = onCall({ timeoutSeconds: 30 }, async (request) => {
+  if (request.auth?.token?.email !== ADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
+  }
+  const { name, email } = request.data || {};
+  if (!name || !email) throw new HttpsError("invalid-argument", "name et email requis.");
+
+  const authUser = await admin.auth().getUserByEmail(email).catch(() => null);
+  if (!authUser) throw new HttpsError("not-found", "Aucun compte Auth avec cet email.");
+
+  await db.collection("profiles").doc(name).set({ email }, { merge: true });
+  return { ok: true };
 });
