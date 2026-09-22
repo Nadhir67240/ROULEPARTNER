@@ -16,6 +16,7 @@ import {
   requestEmailChange, updateProfileFields, changeDriverLicense,
   setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
+  listenForegroundMessages,
 } from "./firebase";
 
 const TYPES = [
@@ -1196,6 +1197,31 @@ export default function App() {
     if (driverName && notifPermission === "granted") {
       registerFcmToken(driverName);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverName]);
+
+  // Le service worker n'affiche les push que si l'appli est en arrière-plan — quand
+  // l'onglet est ouvert au premier plan (cas typique pendant qu'un chauffeur regarde
+  // sa course se faire prendre), Firebase livre le message silencieusement au JS de la
+  // page. Ce listener rattrape ce cas en affichant quand même la notification.
+  useEffect(() => {
+    if (!driverName) return;
+    listenForegroundMessages((payload) => {
+      if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+      const n = payload.notification || {};
+      const d = payload.data || {};
+      navigator.serviceWorker?.getRegistration().then((reg) => {
+        if (!reg) return;
+        reg.showNotification(n.title || "RoulePartner", {
+          body: n.body || "",
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+          tag: d.rideId || "roulepartner",
+          renotify: true,
+          data: d,
+        });
+      });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverName]);
 

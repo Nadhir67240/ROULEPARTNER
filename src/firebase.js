@@ -29,7 +29,7 @@ import {
   onAuthStateChanged,
   verifyBeforeUpdateEmail,
 } from "firebase/auth";
-import { getMessaging, getToken, isSupported } from "firebase/messaging";
+import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
 const firebaseConfig = {
@@ -309,6 +309,20 @@ export async function registerFcmToken(driverName) {
     console.warn("Notifications push indisponibles sur cet appareil :", e);
     return null;
   }
+}
+
+// Le service worker (firebase-messaging-sw.js) n'affiche la notif que si l'appli
+// est en arrière-plan ou fermée : quand l'onglet RoulePartner est ouvert et au
+// premier plan, Firebase livre le push silencieusement au JS de la page au lieu
+// de passer par le service worker, et sans ce listener rien ne s'affiche —
+// c'est ce qui faisait "disparaître" les notifs de prise/départ/fin de course
+// pendant que le chauffeur avait l'appli sous les yeux.
+export function listenForegroundMessages(onPayload) {
+  isSupported().then((supported) => {
+    if (!supported) return;
+    const messaging = getMessaging(app);
+    onMessage(messaging, onPayload);
+  });
 }
 
 // Envoie un email de confirmation à la NOUVELLE adresse — le changement ne

@@ -34,6 +34,10 @@ messaging.onBackgroundMessage((payload) => {
     // Une course prioritaire reste affichée tant que le chauffeur ne l'a pas vue :
     // il n'a que quelques secondes pour se décider.
     requireInteraction: isPriority,
+    // Sans renotify, une notif qui partage le même tag qu'une précédente (ex : prise
+    // puis départ puis fin de la même course) remplace l'ancienne SANS re-sonner/vibrer —
+    // le chauffeur ne voit alors que la toute première des trois.
+    renotify: true,
     data: d,
   });
 });
