@@ -843,7 +843,7 @@ function wavePath(yBase, amp, freq, phase, width = 400, steps = 48) {
 // logo, nom de l'appli, illustration des 3 types de véhicules pris en charge, puis un
 // bouton pour continuer. `splashSeen` (sessionStorage) évite de le réafficher à chaque
 // rechargement pendant la même session.
-function AuthSplash({ onContinue }) {
+function AuthSplash({ onChoose }) {
   const waveLines = React.useMemo(() => {
     const lines = [];
     for (let i = 0; i < 15; i++) {
@@ -884,32 +884,32 @@ function AuthSplash({ onContinue }) {
         className="rp-splash-fade"
         style={{
           position: "relative", zIndex: 1, minHeight: "100vh",
-          display: "flex", flexDirection: "column", alignItems: "center",
-          padding: "64px 24px 40px", textAlign: "center",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          padding: "28px 22px", textAlign: "center", gap: 0,
         }}
       >
-        <div style={{ ...styles.logoBadgeLarge, width: 72, height: 72, boxShadow: "0 0 44px rgba(255,180,58,0.45)" }}>
-          <Car size={34} color="#1A1206" />
+        <div style={{ ...styles.logoBadgeLarge, width: 52, height: 52, margin: "0 auto 10px", boxShadow: "0 0 36px rgba(255,180,58,0.45)" }}>
+          <Car size={24} color="#1A1206" />
           <span style={styles.logoBeaconLarge} />
         </div>
 
-        <h1 style={{ fontFamily: "'Manrope', sans-serif", fontSize: 38, fontWeight: 800, letterSpacing: 0.3, margin: "22px 0 0" }}>
+        <h1 style={{ fontFamily: "'Manrope', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: 0.2, margin: 0 }}>
           <span style={{ color: "#F2F4F7" }}>Roule</span>
           <span style={{ color: "#FFB43A" }}>Partner</span>
         </h1>
 
-        <div style={{ display: "flex", width: 120, height: 4, borderRadius: 2, overflow: "hidden", margin: "14px 0 14px" }}>
+        <div style={{ display: "flex", width: 90, height: 3, borderRadius: 2, overflow: "hidden", margin: "9px 0 9px" }}>
           <span style={{ flex: 1, background: "#4169E1" }} />
           <span style={{ flex: 1, background: "#F2F4F7" }} />
           <span style={{ flex: 1, background: "#E5484D" }} />
         </div>
 
-        <p style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 3, color: "#9AA4C7", textTransform: "uppercase", margin: 0 }}>
+        <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2.5, color: "#9AA4C7", textTransform: "uppercase", margin: 0 }}>
           Signalez · Partagez · Roulez
         </p>
 
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", width: "100%", margin: "32px 0", minHeight: 120 }}>
-          <svg viewBox="0 0 400 160" width="100%" style={{ maxWidth: 360 }} aria-hidden="true">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", margin: "14px 0" }}>
+          <svg viewBox="0 0 400 160" width="100%" style={{ maxWidth: 260 }} aria-hidden="true">
             <defs>
               <linearGradient id="vehGradTaxi" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#FFC968" />
@@ -937,25 +937,31 @@ function AuthSplash({ onContinue }) {
           </svg>
         </div>
 
-        <p style={{ fontSize: 15, color: "#C6CCE6", lineHeight: 1.5, maxWidth: 320, margin: "0 auto" }}>
-          Le réseau qui connecte les chauffeurs taxi, VSL et ambulance
-        </p>
-        <p style={{ fontSize: 19, fontWeight: 800, color: "#F2F4F7", lineHeight: 1.35, maxWidth: 320, margin: "10px auto 0" }}>
-          pour ne plus jamais rater une course.
+        <p style={{ fontSize: 13.5, color: "#C6CCE6", lineHeight: 1.4, maxWidth: 300, margin: 0 }}>
+          Taxi, VSL, ambulance : partagez vos courses entre pros, fini les groupes WhatsApp.
         </p>
 
-        <div style={{ marginTop: 24, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 14px", borderRadius: 20, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
-          <span style={{ width: 18, height: 12, borderRadius: 2, background: "linear-gradient(#0055A4 33%, #fff 33% 66%, #EF4135 66%)" }} />
-          <span style={{ fontSize: 12.5, color: "#C6CCE6" }}>Plateforme 100% française</span>
+        <div style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 20, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
+          <span style={{ width: 16, height: 11, borderRadius: 2, background: "linear-gradient(to right, #0055A4 33%, #fff 33% 66%, #EF4135 66%)" }} />
+          <span style={{ fontSize: 11.5, color: "#C6CCE6" }}>Plateforme 100% française</span>
         </div>
 
-        <button
-          type="button"
-          onClick={onContinue}
-          style={{ ...styles.btnPrimary, marginTop: 32, width: "100%", maxWidth: 320 }}
-        >
-          Continuer
-        </button>
+        <div style={{ display: "flex", gap: 10, width: "100%", maxWidth: 320, marginTop: 18 }}>
+          <button
+            type="button"
+            onClick={() => onChoose("login")}
+            style={{ ...styles.btnPrimary, flex: 1, justifyContent: "center" }}
+          >
+            Se connecter
+          </button>
+          <button
+            type="button"
+            onClick={() => onChoose("signup")}
+            style={{ ...styles.btnGhost, flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            S'inscrire
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2254,7 +2260,7 @@ export default function App() {
 
   if (!user) {
     if (!splashSeen) {
-      return <AuthSplash onContinue={dismissSplash} />;
+      return <AuthSplash onChoose={(mode) => { setAuthMode(mode); dismissSplash(); }} />;
     }
     return (
       <div style={styles.pageAuth}>
