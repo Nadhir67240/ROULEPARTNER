@@ -857,7 +857,10 @@ function AuthSplash({ onChoose }) {
   }, []);
 
   return (
-    <div style={{ minHeight: "100vh", position: "relative", overflow: "hidden", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+    <div style={{ position: "fixed", inset: 0, overflow: "hidden", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+      {/* position:fixed + inset:0 plutôt que 100vh : sur mobile (Safari/Chrome), 100vh compte
+          la hauteur avec la barre d'adresse repliée, donc le contenu déborde et se retrouve
+          décentré tant qu'on n'a pas scrollé — ça colle toujours exactement à l'écran visible. */}
       <style>{`
         @keyframes rpSplashIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         .rp-splash-fade { animation: rpSplashIn 0.55s ease-out both; }
@@ -884,9 +887,10 @@ function AuthSplash({ onChoose }) {
       <div
         className="rp-splash-fade"
         style={{
-          position: "relative", zIndex: 1, minHeight: "100vh",
+          position: "relative", zIndex: 1, height: "100%", boxSizing: "border-box",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          padding: "28px 22px", textAlign: "center", gap: 0,
+          padding: "calc(env(safe-area-inset-top, 0px) + 20px) 22px calc(env(safe-area-inset-bottom, 0px) + 20px)",
+          textAlign: "center", gap: 0, overflowY: "auto",
         }}
       >
         <div style={{ ...styles.logoBadgeLarge, width: 52, height: 52, margin: "0 auto 10px", boxShadow: "0 0 36px rgba(255,180,58,0.45)" }}>
