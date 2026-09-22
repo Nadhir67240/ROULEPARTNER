@@ -828,6 +828,139 @@ function VehicleSilhouette({ x, y, scale = 1, color, withCross, roofSign }) {
   );
 }
 
+// Ligne ondulée (texture de fond de l'écran de démarrage) échantillonnée sur une sinusoïde.
+function wavePath(yBase, amp, freq, phase, width = 400, steps = 48) {
+  let d = `M0,${(yBase + amp * Math.sin(phase)).toFixed(1)}`;
+  for (let i = 1; i <= steps; i++) {
+    const x = (width / steps) * i;
+    const y = yBase + amp * Math.sin((i / steps) * Math.PI * 2 * freq + phase);
+    d += ` L${x.toFixed(1)},${y.toFixed(1)}`;
+  }
+  return d;
+}
+
+// Écran de démarrage affiché une fois par session avant le formulaire de connexion :
+// logo, nom de l'appli, illustration des 3 types de véhicules pris en charge, puis un
+// bouton pour continuer. `splashSeen` (sessionStorage) évite de le réafficher à chaque
+// rechargement pendant la même session.
+function AuthSplash({ onContinue }) {
+  const waveLines = React.useMemo(() => {
+    const lines = [];
+    for (let i = 0; i < 15; i++) {
+      lines.push({
+        d: wavePath(30 + i * 42, 12 + (i % 3) * 5, 1.3 + (i % 4) * 0.25, i * 0.55, 400, 48),
+        opacity: 0.05 + (i % 3) * 0.025,
+      });
+    }
+    return lines;
+  }, []);
+
+  return (
+    <div style={{ minHeight: "100vh", position: "relative", overflow: "hidden", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+      <style>{`
+        @keyframes rpSplashIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+        .rp-splash-fade { animation: rpSplashIn 0.55s ease-out both; }
+      `}</style>
+      <svg
+        viewBox="0 0 400 860"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: 0 }}
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id="splashBgGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#0B0E1A" />
+            <stop offset="55%" stopColor="#10142A" />
+            <stop offset="100%" stopColor="#161B33" />
+          </linearGradient>
+        </defs>
+        <rect width={400} height={860} fill="url(#splashBgGrad)" />
+        {waveLines.map((w, i) => (
+          <path key={i} d={w.d} stroke="#8FA6FF" strokeWidth={1} fill="none" opacity={w.opacity} />
+        ))}
+      </svg>
+
+      <div
+        className="rp-splash-fade"
+        style={{
+          position: "relative", zIndex: 1, minHeight: "100vh",
+          display: "flex", flexDirection: "column", alignItems: "center",
+          padding: "64px 24px 40px", textAlign: "center",
+        }}
+      >
+        <div style={{ ...styles.logoBadgeLarge, width: 72, height: 72, boxShadow: "0 0 44px rgba(255,180,58,0.45)" }}>
+          <Car size={34} color="#1A1206" />
+          <span style={styles.logoBeaconLarge} />
+        </div>
+
+        <h1 style={{ fontFamily: "'Manrope', sans-serif", fontSize: 38, fontWeight: 800, letterSpacing: 0.3, margin: "22px 0 0" }}>
+          <span style={{ color: "#F2F4F7" }}>Roule</span>
+          <span style={{ color: "#FFB43A" }}>Partner</span>
+        </h1>
+
+        <div style={{ display: "flex", width: 120, height: 4, borderRadius: 2, overflow: "hidden", margin: "14px 0 14px" }}>
+          <span style={{ flex: 1, background: "#4169E1" }} />
+          <span style={{ flex: 1, background: "#F2F4F7" }} />
+          <span style={{ flex: 1, background: "#E5484D" }} />
+        </div>
+
+        <p style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: 3, color: "#9AA4C7", textTransform: "uppercase", margin: 0 }}>
+          Signalez · Partagez · Roulez
+        </p>
+
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", width: "100%", margin: "32px 0", minHeight: 120 }}>
+          <svg viewBox="0 0 400 160" width="100%" style={{ maxWidth: 360 }} aria-hidden="true">
+            <defs>
+              <linearGradient id="vehGradTaxi" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#FFC968" />
+                <stop offset="100%" stopColor="#F0A020" />
+              </linearGradient>
+              <linearGradient id="vehGradAmb" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#F0897A" />
+                <stop offset="100%" stopColor="#D85242" />
+              </linearGradient>
+              <linearGradient id="vehGradVsl" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#5FE096" />
+                <stop offset="100%" stopColor="#28A860" />
+              </linearGradient>
+              <radialGradient id="vehShadow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="#000" stopOpacity={0.45} />
+                <stop offset="100%" stopColor="#000" stopOpacity={0} />
+              </radialGradient>
+            </defs>
+            <ellipse cx={70} cy={148} rx={55} ry={9} fill="url(#vehShadow)" />
+            <ellipse cx={210} cy={152} rx={65} ry={10} fill="url(#vehShadow)" />
+            <ellipse cx={345} cy={148} rx={50} ry={9} fill="url(#vehShadow)" />
+            <VehicleSilhouette x={16} y={110} scale={0.82} color="url(#vehGradTaxi)" roofSign />
+            <VehicleSilhouette x={150} y={104} scale={1} color="url(#vehGradAmb)" withCross />
+            <VehicleSilhouette x={292} y={112} scale={0.76} color="url(#vehGradVsl)" />
+          </svg>
+        </div>
+
+        <p style={{ fontSize: 15, color: "#C6CCE6", lineHeight: 1.5, maxWidth: 320, margin: "0 auto" }}>
+          Le réseau qui connecte les chauffeurs taxi, VSL et ambulance
+        </p>
+        <p style={{ fontSize: 19, fontWeight: 800, color: "#F2F4F7", lineHeight: 1.35, maxWidth: 320, margin: "10px auto 0" }}>
+          pour ne plus jamais rater une course.
+        </p>
+
+        <div style={{ marginTop: 24, display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 14px", borderRadius: 20, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
+          <span style={{ width: 18, height: 12, borderRadius: 2, background: "linear-gradient(#0055A4 33%, #fff 33% 66%, #EF4135 66%)" }} />
+          <span style={{ fontSize: 12.5, color: "#C6CCE6" }}>Plateforme 100% française</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={onContinue}
+          style={{ ...styles.btnPrimary, marginTop: 32, width: "100%", maxWidth: 320 }}
+        >
+          Continuer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Fond fixe (dégradé + halos de couleur) derrière la carte de connexion.
 function AuthBackdrop() {
   return (
@@ -901,6 +1034,13 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [splashSeen, setSplashSeen] = useState(() => {
+    try { return sessionStorage.getItem("rp_splash_seen") === "1"; } catch { return false; }
+  });
+  const dismissSplash = () => {
+    try { sessionStorage.setItem("rp_splash_seen", "1"); } catch {}
+    setSplashSeen(true);
+  };
   const driverName = user?.displayName || "";
   const [rides, setRides] = useState([]);
   const [positions, setPositions] = useState({});
@@ -2113,6 +2253,9 @@ export default function App() {
   }
 
   if (!user) {
+    if (!splashSeen) {
+      return <AuthSplash onContinue={dismissSplash} />;
+    }
     return (
       <div style={styles.pageAuth}>
         <AuthBackdrop />
