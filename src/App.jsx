@@ -802,6 +802,93 @@ function matchesGrandeVilleExtension(addressText) {
   return GRANDE_VILLE_EXTENSION_MATCHERS.some((group) => group.every((kw) => norm.includes(kw)));
 }
 
+// Silhouette d'un véhicule (taxi / VSL / ambulance) pour le fond de l'écran de connexion.
+// `withCross` ajoute la croix d'ambulance, `roofSign` la plaque taxi lumineuse.
+function VehicleSilhouette({ x, y, scale = 1, color, withCross, roofSign }) {
+  return (
+    <g transform={`translate(${x},${y}) scale(${scale})`}>
+      {roofSign && <rect x={44} y={-16} width={22} height={9} rx={2.5} fill={color} opacity={0.9} />}
+      <path
+        d="M6,34 C2,34 0,31 0,27 L0,20 C0,16 2,13 6,11 L22,11 L34,-6 C36,-9 39,-10 43,-10 L88,-10 C92,-10 95,-8 96,-4 L100,11 L114,11 C118,11 120,14 120,18 L120,27 C120,31 118,34 114,34 Z"
+        fill={color}
+      />
+      <path d="M38,-6 L46,-6 L42,10 L30,10 Z" fill="#0F1114" opacity={0.55} />
+      <path d="M52,-6 L82,-6 L86,10 L52,10 Z" fill="#0F1114" opacity={0.55} />
+      {withCross && (
+        <g transform="translate(64,12)">
+          <rect x={-3} y={-9} width={6} height={18} rx={1.5} fill="#F2F4F7" />
+          <rect x={-9} y={-3} width={18} height={6} rx={1.5} fill="#F2F4F7" />
+        </g>
+      )}
+      <circle cx={26} cy={34} r={11} fill="#15181D" />
+      <circle cx={26} cy={34} r={4.5} fill="#3A4048" />
+      <circle cx={94} cy={34} r={11} fill="#15181D" />
+      <circle cx={94} cy={34} r={4.5} fill="#3A4048" />
+    </g>
+  );
+}
+
+// Fond fixe (dégradé + halos de couleur) derrière la carte de connexion.
+function AuthBackdrop() {
+  return (
+    <svg
+      viewBox="0 0 400 820"
+      preserveAspectRatio="xMidYMid slice"
+      style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: 0, pointerEvents: "none" }}
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id="authBgGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#0F1114" />
+          <stop offset="60%" stopColor="#101317" />
+          <stop offset="100%" stopColor="#15181D" />
+        </linearGradient>
+        <radialGradient id="authGlowAmber" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#FFB43A" stopOpacity={0.3} />
+          <stop offset="100%" stopColor="#FFB43A" stopOpacity={0} />
+        </radialGradient>
+        <radialGradient id="authGlowGreen" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="#3BD07A" stopOpacity={0.24} />
+          <stop offset="100%" stopColor="#3BD07A" stopOpacity={0} />
+        </radialGradient>
+      </defs>
+      <rect width={400} height={820} fill="url(#authBgGrad)" />
+      <circle cx={40} cy={120} r={220} fill="url(#authGlowAmber)" />
+      <circle cx={370} cy={200} r={200} fill="url(#authGlowGreen)" />
+    </svg>
+  );
+}
+
+// Bandeau "route" avec taxi / ambulance / VSL, placé sous la carte de connexion
+// (dans le flux normal de la page, pas en fond superposé) pour rester visible
+// même sur un écran mobile étroit où la carte occupe presque toute la largeur.
+function AuthVehicleStrip() {
+  return (
+    <div
+      style={{
+        position: "relative",
+        zIndex: 1,
+        maxWidth: 380,
+        margin: "0 auto 24px",
+        borderRadius: 14,
+        overflow: "hidden",
+        border: "1px solid #23272E",
+        boxShadow: "0 12px 30px rgba(0,0,0,0.4)",
+      }}
+    >
+      <svg viewBox="0 0 400 140" width="100%" height="140" aria-hidden="true">
+        <rect width={400} height={140} fill="#131519" />
+        {Array.from({ length: 9 }).map((_, i) => (
+          <rect key={i} x={i * 46 + 6} y={28} width={22} height={3} rx={1.5} fill="#2A2F36" />
+        ))}
+        <VehicleSilhouette x={16} y={84} scale={0.78} color="#FFB43A" roofSign />
+        <VehicleSilhouette x={150} y={78} scale={0.94} color="#E86E5E" withCross />
+        <VehicleSilhouette x={290} y={86} scale={0.72} color="#3BD07A" />
+      </svg>
+    </div>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -2011,7 +2098,8 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div style={styles.page}>
+      <div style={styles.pageAuth}>
+        <AuthBackdrop />
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
             <Car size={30} color="#1A1206" />
@@ -2019,13 +2107,15 @@ export default function App() {
           </div>
           <h1 style={styles.gateTitle}>RoulePartner</h1>
         </div>
+        <AuthVehicleStrip />
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div style={styles.page}>
+      <div style={styles.pageAuth}>
+        <AuthBackdrop />
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
             <Car size={30} color="#1A1206" />
@@ -2128,13 +2218,15 @@ export default function App() {
             </button>
           </form>
         </div>
+        <AuthVehicleStrip />
       </div>
     );
   }
 
   if (!user.emailVerified) {
     return (
-      <div style={styles.page}>
+      <div style={styles.pageAuth}>
+        <AuthBackdrop />
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
             <Car size={30} color="#1A1206" />
@@ -2181,6 +2273,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        <AuthVehicleStrip />
       </div>
     );
   }
@@ -4414,7 +4507,16 @@ const styles = {
     padding: "0 0 40px 0",
     position: "relative",
   },
-  gateCard: { maxWidth: 380, margin: "80px auto", background: "#191C21", borderRadius: 14, padding: "32px 28px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid #23272E" },
+  pageAuth: {
+    minHeight: "100vh",
+    background: "#0F1114",
+    color: "#F2F4F7",
+    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    padding: "0 0 40px 0",
+    position: "relative",
+    overflow: "hidden",
+  },
+  gateCard: { position: "relative", zIndex: 1, maxWidth: 380, margin: "80px auto", background: "rgba(25,28,33,0.88)", backdropFilter: "blur(6px)", borderRadius: 14, padding: "32px 28px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid #23272E" },
   logoBadgeLarge: {
     position: "relative", width: 64, height: 64, borderRadius: 18,
     background: "#FFB43A",
