@@ -1,23 +1,111 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
+/* Thème sombre (par défaut). Les styles de l'appli utilisent ces variables pour
+   toutes les couleurs neutres (fonds, bordures, textes) : changer de thème, c'est
+   seulement changer ces valeurs. Les accents (orange, vert, rouge…) restent fixes,
+   sauf quand ils servent de couleur de TEXTE (--accent-text, --positive-text). */
 :root {
+  color-scheme: dark;
   --bg-screen: #0F1114;
   --bg-bar: #131519;
   --surface-card: #191C21;
-  --surface-muted: #15181C;
+  --surface-muted: #15181D;
   --surface-tile: #22262C;
+  --surface-accent: #1F1A12;
   --border-subtle: #23272E;
   --border-strong: #2A2F36;
   --border-outline: #3A4048;
-  --divider: #1D2126;
+  --divider: #1B1E23;
   --text-primary: #F2F4F7;
   --text-secondary: #E4E7EB;
   --text-tertiary: #B8BEC6;
+  --text-muted-strong: #A3AAB3;
   --text-muted: #8A9099;
   --text-faint: #6E757E;
+  --text-disabled: #4A5058;
   --accent: #FFB43A;
+  --accent-text: #FFB43A;
   --ink-on-accent: #1A1206;
   --positive: #3BD07A;
+  --positive-text: #3BD07A;
+  --tag-filter: none;
+}
+
+/* Thème clair : lisible en plein soleil derrière un pare-brise. Appliqué quand le
+   téléphone est en mode clair (réglage "Automatique"), ou forcé par le chauffeur. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg-screen: #F2F3F5;
+    --bg-bar: #FFFFFF;
+    --surface-card: #FFFFFF;
+    --surface-muted: #ECEEF1;
+    --surface-tile: #E9ECEF;
+    --surface-accent: #FFF4E0;
+    --border-subtle: #DDE1E6;
+    --border-strong: #D0D5DB;
+    --border-outline: #BCC2C9;
+    --divider: #E4E7EB;
+    --text-primary: #101318;
+    --text-secondary: #1C2027;
+    --text-tertiary: #363C44;
+    --text-muted-strong: #444B54;
+    --text-muted: #555C66;
+    --text-faint: #6A717B;
+    --text-disabled: #A2A8B0;
+    --accent-text: #A35F00;
+    --positive-text: #17864A;
+    --tag-filter: brightness(0.68) saturate(1.5);
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-screen: #F2F3F5;
+  --bg-bar: #FFFFFF;
+  --surface-card: #FFFFFF;
+  --surface-muted: #ECEEF1;
+  --surface-tile: #E9ECEF;
+  --surface-accent: #FFF4E0;
+  --border-subtle: #DDE1E6;
+  --border-strong: #D0D5DB;
+  --border-outline: #BCC2C9;
+  --divider: #E4E7EB;
+  --text-primary: #101318;
+  --text-secondary: #1C2027;
+  --text-tertiary: #363C44;
+  --text-muted-strong: #444B54;
+  --text-muted: #555C66;
+  --text-faint: #6A717B;
+  --text-disabled: #A2A8B0;
+  --accent-text: #A35F00;
+  --positive-text: #17864A;
+  --tag-filter: brightness(0.68) saturate(1.5);
+}
+
+/* Écrans de connexion : illustration de nuit fixe, donc toujours en thème sombre. */
+.rp-force-dark {
+  color-scheme: dark;
+  --bg-screen: #0F1114;
+  --bg-bar: #131519;
+  --surface-card: #191C21;
+  --surface-muted: #15181D;
+  --surface-tile: #22262C;
+  --surface-accent: #1F1A12;
+  --border-subtle: #23272E;
+  --border-strong: #2A2F36;
+  --border-outline: #3A4048;
+  --divider: #1B1E23;
+  --text-primary: #F2F4F7;
+  --text-secondary: #E4E7EB;
+  --text-tertiary: #B8BEC6;
+  --text-muted-strong: #A3AAB3;
+  --text-muted: #8A9099;
+  --text-faint: #6E757E;
+  --text-disabled: #4A5058;
+  --accent-text: #FFB43A;
+  --positive-text: #3BD07A;
+  --tag-filter: none;
+  color: var(--text-primary);
 }
 
 * {
@@ -76,7 +164,7 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2A2F36;
+  background: var(--border-strong);
   border-radius: 4px;
 }
 

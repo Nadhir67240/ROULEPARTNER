@@ -18,1103 +18,15 @@ import {
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
-
-const TYPES = [
-  { id: "taxi", label: "Taxi conventionné", color: "#FFB43A", icon: Car },
-  { id: "taxi_payant", label: "Course payante", color: "#8FB3F5", icon: Euro },
-  { id: "vsl", label: "VSL", color: "#3BD07A", icon: Car },
-  { id: "ambulance", label: "Ambulance", color: "#E86E5E", icon: Stethoscope },
-];
-
-const TRAJET_TYPES = [
-  { id: "aller", label: "Aller" },
-  { id: "retour", label: "Retour" },
-  { id: "allerRetour", label: "Aller-retour" },
-];
-
-function trajetLabel(id) {
-  return (TRAJET_TYPES.find((t) => t.id === id) || TRAJET_TYPES[0]).label;
-}
-
-// Fenêtre de priorité : à la publication, seuls les chauffeurs les plus proches
-// peuvent prendre la course. Passé ce délai, elle s'ouvre à tout le monde.
-const PRIORITY_WINDOW_MS = 15 * 1000;
-
-// Rayon autour de la prise en charge à l'intérieur duquel un chauffeur est prioritaire —
-// doit rester identique à PRIORITY_RADIUS_KM dans functions/index.js, qui fait foi pour
-// l'attribution réelle (règles de sécurité Firestore). Cette valeur ne sert ici qu'à
-// afficher l'alerte de priorité et verrouiller "Je la prends" instantanément dès l'arrivée
-// de la course, avant que le serveur n'ait eu le temps d'écrire sa propre liste sur le
-// document (voir r.priorityDrivers, qui prend le relais dès qu'il existe et fait foi).
-const PRIORITY_RADIUS_KM = 1.0;
-
-// Une position n'est prise en compte que si elle est récente — même règle que côté serveur.
-const POSITION_FRESH_MS = 15 * 60 * 1000;
-
-// Nombre maximum de chauffeurs prioritaires simultanés.
-const PRIORITY_MAX_DRIVERS = 3;
-
-// Vitesse moyenne estimée pour convertir une distance à vol d'oiseau en temps de trajet.
-// Approximation, pas un vrai calcul d'itinéraire routier.
-const AVG_SPEED_KMH = 32;
-
-// Délai laissé au posteur pour confirmer avant qu'une demande soit acceptée automatiquement.
-const CLAIM_CONFIRM_WINDOW_MS = 30 * 1000;
-
-// Les courses terminées depuis plus de X jours sont purgées automatiquement (y compris leur photo).
-// Conservées 1 an pour que le calendrier "Mes courses" garde l'historique.
-const AUTO_PURGE_DAYS = 365;
-
-// Doit correspondre exactement à l'email utilisé dans les règles Firestore.
-const ADMIN_EMAIL = "taxi-vsl67@hotmail.com";
-
-// Grille tarifaire officielle "Taxi conventionné" — Convention nationale 2025
-// (source : ameli.fr, arrêté du 29 juillet 2025). Le tarif au km dépend du
-// département de licence — modifie DEFAULT_KM_RATE si besoin (1,07 à 1,27 €/km).
-const TAXI_FORFAIT_PEC = 13.0; // forfait de prise en charge, 4 premiers km inclus
-const TAXI_FRANCHISE_KM = 4;
-// Grille officielle "Taxi conventionné" par département — Convention nationale 2025
-// (arrêté du 29 juillet 2025, en vigueur depuis le 01/11/2025), source ameli.fr.
-const DEPARTMENT_KM_RATES = [
-  ["01", "Ain", 1.13], ["02", "Aisne", 1.20], ["2A", "Corse-du-Sud", 1.27], ["2B", "Haute-Corse", 1.27],
-  ["03", "Allier", 1.19], ["04", "Alpes-de-Haute-Provence", 1.14], ["05", "Hautes-Alpes", 1.18],
-  ["06", "Alpes-Maritimes", 1.27], ["07", "Ardèche", 1.17], ["08", "Ardennes", 1.17], ["09", "Ariège", 1.15],
-  ["10", "Aube", 1.13], ["11", "Aude", 1.08], ["12", "Aveyron", 1.16], ["13", "Bouches-du-Rhône", 1.10],
-  ["14", "Calvados", 1.07], ["15", "Cantal", 1.13], ["16", "Charente", 1.12], ["17", "Charente-Maritime", 1.10],
-  ["18", "Cher", 1.26], ["19", "Corrèze", 1.16], ["21", "Côte-d'Or", 1.12], ["22", "Côtes-d'Armor", 1.13],
-  ["23", "Creuse", 1.18], ["24", "Dordogne", 1.11], ["25", "Doubs", 1.08], ["26", "Drôme", 1.16],
-  ["27", "Eure", 1.21], ["28", "Eure-et-Loir", 1.19], ["29", "Finistère", 1.07], ["30", "Gard", 1.08],
-  ["31", "Haute-Garonne", 1.10], ["32", "Gers", 1.19], ["33", "Gironde", 1.07], ["34", "Hérault", 1.07],
-  ["35", "Ille-et-Vilaine", 1.07], ["36", "Indre", 1.25], ["37", "Indre-et-Loire", 1.18], ["38", "Isère", 1.22],
-  ["39", "Jura", 1.11], ["40", "Landes", 1.13], ["41", "Loir-et-Cher", 1.13], ["42", "Loire", 1.08],
-  ["43", "Haute-Loire", 1.24], ["44", "Loire-Atlantique", 1.08], ["45", "Loiret", 1.07], ["46", "Lot", 1.13],
-  ["47", "Lot-et-Garonne", 1.11], ["48", "Lozère", 1.25], ["49", "Maine-et-Loire", 1.08], ["50", "Manche", 1.16],
-  ["51", "Marne", 1.12], ["52", "Haute-Marne", 1.26], ["53", "Mayenne", 1.09], ["54", "Meurthe-et-Moselle", 1.09],
-  ["55", "Meuse", 1.12], ["56", "Morbihan", 1.07], ["57", "Moselle", 1.14], ["58", "Nièvre", 1.27],
-  ["59", "Nord", 1.20], ["60", "Oise", 1.20], ["61", "Orne", 1.17], ["62", "Pas-de-Calais", 1.20],
-  ["63", "Puy-de-Dôme", 1.08], ["64", "Pyrénées-Atlantiques", 1.14], ["65", "Hautes-Pyrénées", 1.07],
-  ["66", "Pyrénées-Orientales", 1.18], ["67", "Bas-Rhin", 1.07], ["68", "Haut-Rhin", 1.07], ["69", "Rhône", 1.07],
-  ["70", "Haute-Saône", 1.08], ["71", "Saône-et-Loire", 1.10], ["72", "Sarthe", 1.07], ["73", "Savoie", 1.15],
-  ["74", "Haute-Savoie", 1.22], ["75", "Paris", 1.22], ["76", "Seine-Maritime", 1.18], ["77", "Seine-et-Marne", 1.07],
-  ["78", "Yvelines", 1.07], ["79", "Deux-Sèvres", 1.08], ["80", "Somme", 1.15], ["81", "Tarn", 1.07],
-  ["82", "Tarn-et-Garonne", 1.07], ["83", "Var", 1.16], ["84", "Vaucluse", 1.20], ["85", "Vendée", 1.07],
-  ["86", "Vienne", 1.11], ["87", "Haute-Vienne", 1.10], ["88", "Vosges", 1.10], ["89", "Yonne", 1.11],
-  ["90", "Territoire de Belfort", 1.08], ["91", "Essonne", 1.07], ["92", "Hauts-de-Seine", 1.07],
-  ["93", "Seine-Saint-Denis", 1.07], ["94", "Val-de-Marne", 1.07], ["95", "Val-d'Oise", 1.07],
-  ["971", "Guadeloupe", 1.07], ["972", "Martinique", 1.20], ["973", "Guyane", 1.10], ["974", "Réunion", 1.22],
-  ["976", "Mayotte", 1.10],
-];
-const DEFAULT_DEPARTMENT = "67"; // Bas-Rhin
-const DEFAULT_KM_RATE = 1.07;
-const TAXI_FORFAIT_GRANDE_VILLE = 15.0;
-const TAXI_MAJORATION_NUIT_WEEKEND = 0.5; // +50 %
-const TAXI_TPMR_SUPPLEMENT = 30.0; // supplément fixe, par trajet
-const TAXI_RETOUR_A_VIDE_SEUIL_KM = 50;
-const TAXI_RETOUR_A_VIDE_MAJORATION_COURT = 0.25; // < 50 km en charge
-const TAXI_RETOUR_A_VIDE_MAJORATION_LONG = 0.5; // >= 50 km en charge
-
-const emptyForm = {
-  type: "taxi",
-  patient: "",
-  patientTel: "",
-  depart: "",
-  arrivee: "",
-  heure: "",
-  heureRetour: "",
-  date: todayKey(0),
-  trajet: "aller",
-  departLat: null,
-  departLng: null,
-  departCity: "",
-  departDept: "",
-  arriveeLat: null,
-  arriveeLng: null,
-  arriveeCity: "",
-  arriveeDept: "",
-  tarif: "",
-  urgent: false,
-  tpmr: false,
-  grandeVille: false,
-  retourAVide: false,
-  calcDistanceKm: null,
-  majorationNuitWeekend: false,
-  notes: "",
-  photo: null,
-  document: null,
-  documentName: "",
-};
-
-function uid() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-}
-
-function typeMeta(id) {
-  return TYPES.find((t) => t.id === id) || TYPES[0];
-}
-
-// Fond teinté à faible opacité pour la pastille de type (texte de la même teinte que le fond) —
-// une pastille sobre plutôt qu'un badge plein, l'ambre reste réservé aux actions.
-function tintBg(hex, alpha) {
-  const h = hex.replace("#", "");
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-function formatPostedAt(ts) {
-  const d = new Date(ts);
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const hours = String(d.getHours()).padStart(2, "0");
-  const mins = String(d.getMinutes()).padStart(2, "0");
-  return `${day}/${month} à ${hours}:${mins}`;
-}
-
-function dateKey(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function todayKey(offsetDays = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function timePlusMinutes(mins = 0) {
-  const d = new Date(Date.now() + mins * 60000);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-function formatRideDate(dateStr) {
-  if (!dateStr) return "";
-  if (dateStr === todayKey(0)) return "aujourd'hui";
-  if (dateStr === todayKey(1)) return "demain";
-  return dateStr.split("-").reverse().join("/");
-}
-
-const FRENCH_MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
-function formatDayMonth(dateStr) {
-  const [, m, d] = dateStr.split("-").map(Number);
-  return `${d} ${FRENCH_MONTHS[m - 1]}`;
-}
-
-const FRENCH_WEEKDAYS_SHORT = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
-
-// Helpers du calendrier "Mes courses" — on travaille en clés "AAAA-MM-JJ" (même format
-// que ride.date) en heure locale, pour éviter les décalages de fuseau de toISOString().
-function keyFromDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-function dateFromKey(key) {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-function addDaysKey(key, n) {
-  const d = dateFromKey(key);
-  d.setDate(d.getDate() + n);
-  return keyFromDate(d);
-}
-// Semaine du lundi au dimanche, comme en France.
-function startOfWeekKey(key) {
-  const d = dateFromKey(key);
-  return addDaysKey(key, -((d.getDay() + 6) % 7));
-}
-
-// Badge de timing d'une course : le chauffeur doit voir d'un coup d'oeil si
-// c'est pour tout de suite (rouge, pulse), pour bientôt aujourd'hui (orange),
-// ou pour un autre jour (bleu, avec le jour de la semaine) — plutôt que de
-// devoir lire la date/heure en petit texte dans les détails.
-function rideTimingBadge(r) {
-  if (!r.date || !r.heure) return null;
-  const [h, mnt] = r.heure.split(":").map(Number);
-  const [y, mo, d] = r.date.split("-").map(Number);
-  if ([h, mnt, y, mo, d].some((n) => Number.isNaN(n))) return null;
-  const scheduled = new Date(y, mo - 1, d, h, mnt).getTime();
-  const diffMin = Math.round((scheduled - Date.now()) / 60000);
-  const isToday = r.date === todayKey(0);
-  const isTomorrow = r.date === todayKey(1);
-
-  if (isToday) {
-    if (diffMin <= 15) {
-      return { label: diffMin <= 0 ? "Tout de suite" : `Dans ${diffMin} min`, bg: "#E5484D", color: "#fff", pulse: true };
-    }
-    if (diffMin <= 60) {
-      return { label: `Dans ${diffMin} min · ${r.heure}`, bg: "#FFB43A", color: "#1A1206", pulse: false };
-    }
-    return { label: `Aujourd'hui à ${r.heure}`, bg: "#2A2F36", color: "#E4E7EB", pulse: false };
-  }
-  if (isTomorrow) {
-    return { label: `Demain à ${r.heure}`, bg: "#5B8DEF", color: "#fff", pulse: false };
-  }
-  const weekday = FRENCH_WEEKDAYS_SHORT[new Date(y, mo - 1, d).getDay()];
-  return { label: `${weekday} ${formatDayMonth(r.date)} à ${r.heure}`, bg: "#5B8DEF", color: "#fff", pulse: false };
-}
-
-// Plage lundi→dimanche de la semaine en cours, pour le filtre "Cette semaine".
-function thisWeekRange() {
-  const now = new Date();
-  const day = now.getDay(); // 0 = dimanche
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return { start: fmt(monday), end: fmt(sunday) };
-}
-
-let sharedAudioCtx = null;
-let audioUnlocked = false;
-
-function getAudioCtx() {
-  if (!sharedAudioCtx) {
-    sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return sharedAudioCtx;
-}
-
-function unlockAudio() {
-  if (audioUnlocked) return;
-  try {
-    const ctx = getAudioCtx();
-    if (ctx.state === "suspended") ctx.resume();
-    // joue un son quasi silencieux pour "débloquer" définitivement l'audio sur ce téléphone
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    gain.gain.value = 0.0001;
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.05);
-    audioUnlocked = true;
-  } catch (e) {
-    // ignore
-  }
-}
-
-// Brouillon de la course en cours de saisie, gardé sur le téléphone : un rafraîchissement
-// (volontaire ou "tirer vers le bas" par erreur) rouvre le formulaire là où on en était.
-// Au-delà de 12 h, le brouillon est considéré comme abandonné.
-const RIDE_DRAFT_KEY = "rp-ride-draft";
-const RIDE_DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-function loadRideDraft() {
-  try {
-    const d = JSON.parse(localStorage.getItem(RIDE_DRAFT_KEY));
-    if (!d || !d.form || Date.now() - d.savedAt > RIDE_DRAFT_MAX_AGE_MS) return null;
-    return d;
-  } catch (e) {
-    return null;
-  }
-}
-function saveRideDraft(draft) {
-  try {
-    localStorage.setItem(RIDE_DRAFT_KEY, JSON.stringify(draft));
-  } catch (e) {
-    // Stockage plein (photo/document trop lourds) : on garde au moins le reste de la saisie.
-    try {
-      localStorage.setItem(RIDE_DRAFT_KEY, JSON.stringify({
-        ...draft, form: { ...draft.form, photo: null, document: null, documentName: "" },
-      }));
-    } catch (e2) {
-      // ignore
-    }
-  }
-}
-function clearRideDraft() {
-  try {
-    localStorage.removeItem(RIDE_DRAFT_KEY);
-  } catch (e) {
-    // ignore
-  }
-}
-
-// Une couleur distincte par étape de la course, pour la lire d'un coup d'œil.
-const STATUS_COLORS = {
-  disponible: "#3BD07A", // vert : à prendre
-  en_attente: "#FFB43A", // orange : demande en cours de confirmation
-  prise: "#4FA3FF",      // bleu : attribuée, pas encore démarrée
-  en_cours: "#B18CFF",   // violet : patient à bord
-  terminee: "#6E757E",   // gris : finie
-};
-const statusColor = (status) => STATUS_COLORS[status] || "#FFB43A";
-
-// Vibration en plus du son : au volant ou dans le bruit, on la sent même sans
-// entendre l'alerte. Sans effet sur iPhone (Safari ne gère pas l'API Vibration).
-const VIBRATION = {
-  priority: [400, 150, 400, 150, 400, 150, 800],
-  claim: [300, 120, 300],
-  urgent: [250, 100, 250],
-  normal: [200],
-};
-function vibrate(kind) {
-  try {
-    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(VIBRATION[kind] || VIBRATION.normal);
-  } catch (e) {
-    // ignore
-  }
-}
-
-function playAlertSound(urgent) {
-  try {
-    const ctx = getAudioCtx();
-    if (ctx.state === "suspended") ctx.resume();
-    const notes = urgent ? [880, 660, 880] : [740];
-    notes.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = freq;
-      osc.type = "sine";
-      gain.gain.value = urgent ? 0.15 : 0.1;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      const start = ctx.currentTime + i * 0.18;
-      osc.start(start);
-      osc.stop(start + 0.16);
-    });
-  } catch (e) {
-    // navigateur sans support audio, on ignore silencieusement
-  }
-}
-
-// Notification visuelle du système (bannière), en plus du son.
-// Fonctionne tant que le navigateur tourne (onglet ouvert, même en arrière-plan) —
-// pas si l'appli est complètement fermée ou le téléphone verrouillé longtemps.
-function notifyNewRide(ride) {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try {
-    new Notification(ride.urgent ? "🚨 Course urgente disponible" : "Nouvelle course disponible", {
-      body: `${ride.depart} → ${ride.arrivee} — ${ride.heure}`,
-      icon: "/icon-192.png",
-      tag: ride.id,
-    });
-  } catch (e) {
-    // ignore
-  }
-}
-
-// Version "pure" du calcul de priorité, utilisable en dehors du rendu (dans
-// l'écouteur Firestore notamment, qui n'a pas accès à l'état React à jour).
-function computePriorityDrivers(ride, positions) {
-  const origin = ridePickupCoords(ride);
-  if (!origin) return [];
-  const now = Date.now();
-  const candidates = [];
-  Object.entries(positions || {}).forEach(([name, pos]) => {
-    if (name === ride.postedBy) return;
-    if (pos.updatedAt && now - pos.updatedAt > POSITION_FRESH_MS) return;
-    const d = distanceKm(origin, pos);
-    if (d != null && d <= PRIORITY_RADIUS_KM) candidates.push({ name, dist: d });
-  });
-  candidates.sort((a, b) => a.dist - b.dist);
-  return candidates.slice(0, PRIORITY_MAX_DRIVERS);
-}
-
-// Notification "course prioritaire" : plus insistante que la notification
-// normale, et elle reste affichée jusqu'à ce que le chauffeur la voie
-// (requireInteraction) — c'est une course qui lui est réservée quelques secondes.
-function notifyPriorityRide(ride, shared) {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try {
-    new Notification("⭐ Course prioritaire pour toi", {
-      body: shared
-        ? `${ride.depart} → ${ride.arrivee} — premier arrivé, premier servi !`
-        : `${ride.depart} → ${ride.arrivee} — tu es le plus proche.`,
-      icon: "/icon-192.png",
-      tag: ride.id,
-      requireInteraction: true,
-    });
-  } catch (e) {
-    // ignore
-  }
-}
-
-function notifyClaimRequest(ride) {
-  playAlertSound(false);
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try {
-    new Notification("🙋 Un chauffeur veut prendre ta course", {
-      body: `${ride.pendingBy} — ${ride.depart} → ${ride.arrivee}`,
-      icon: "/icon-192.png",
-      tag: `${ride.id}-claim`,
-    });
-  } catch (e) {
-    // ignore
-  }
-}
-
-function notifyRideReleased(ride, takenByName) {
-  playAlertSound(false);
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try {
-    new Notification("😬 Un chauffeur a relâché ta course", {
-      body: `${takenByName} — ${ride.depart} → ${ride.arrivee}`,
-      icon: "/icon-192.png",
-      tag: `${ride.id}-released`,
-    });
-  } catch (e) {
-    // ignore
-  }
-}
-
-function notifyStatusChange(ride, newStatus) {
-  const titles = {
-    en_cours: "🚗 Ta course a démarré",
-    terminee: "✅ Ta course est terminée",
-  };
-  const title = titles[newStatus];
-  if (!title) return;
-  playAlertSound(false);
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try {
-    new Notification(title, {
-      body: `${ride.depart} → ${ride.arrivee} — prise par ${ride.takenBy || "?"}`,
-      icon: "/icon-192.png",
-      tag: `${ride.id}-${newStatus}`,
-    });
-  } catch (e) {
-    // ignore
-  }
-}
-
-function notifyNewMessage(senderName, text) {
-  playAlertSound(false);
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  try {
-    new Notification(`💬 Message de ${senderName}`, {
-      body: text,
-      icon: "/icon-192.png",
-    });
-  } catch (e) {
-    // ignore
-  }
-}
-
-// Compresse une photo côté téléphone avant stockage (pas de service payant nécessaire).
-// Réduit taille + qualité jusqu'à tenir dans la limite d'un document Firestore.
-function compressPhoto(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        const maxDim = 1000;
-        if (width > height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        let quality = 0.7;
-        let dataUrl = canvas.toDataURL("image/jpeg", quality);
-        while (dataUrl.length > 700000 && quality > 0.15) {
-          quality -= 0.15;
-          dataUrl = canvas.toDataURL("image/jpeg", quality);
-        }
-        if (dataUrl.length > 900000) {
-          reject(new Error("too_big"));
-        } else {
-          resolve(dataUrl);
-        }
-      };
-      img.onerror = () => reject(new Error("invalid_image"));
-      img.src = e.target.result;
-    };
-    reader.onerror = () => reject(new Error("read_failed"));
-    reader.readAsDataURL(file);
-  });
-}
-
-// Pour l'affichage compact sur la carte : ne garde que la localité (l'adresse
-// complète reste visible dans la fenêtre détaillée, ouverte en cliquant sur la carte).
-function cardLocality(address) {
-  if (!address) return "";
-  const parts = address.split(",").map((s) => s.trim()).filter(Boolean);
-  if (parts.length >= 2) return parts[1];
-  return parts[0];
-}
-
-// Simplifie l'adresse complète renvoyée par le service (numéro + rue, ville, code postal).
-// Si le résultat est un lieu nommé (hôpital, clinique, pharmacie...), son nom est utilisé
-// en tête plutôt que le nom de rue — bien plus utile pour repérer la bonne adresse.
-function shortAddress(s) {
-  const a = s.address || {};
-  const poiName = s.namedetails?.name || a[s.class] || null;
-  const street = [a.house_number, a.road || a.pedestrian || a.footway].filter(Boolean).join(" ");
-  const locality = a.village || a.town || a.city || a.municipality || a.suburb || "";
-  const postcode = a.postcode || "";
-  if (poiName) {
-    const parts = [poiName, locality].filter(Boolean);
-    return parts.length ? parts.join(", ") : s.display_name;
-  }
-  // Sans nom de commune, "5 rue du Rhin, 67240" ou pire, juste "67240", n'aide personne à
-  // identifier le lieu — mieux vaut alors le nom complet renvoyé par le service de recherche
-  // (qui liste toujours au moins la commune) que ce format compact mais incomplet.
-  if (!locality) return s.display_name;
-  const parts = [street, locality, postcode].filter(Boolean);
-  return parts.length ? parts.join(", ") : s.display_name;
-}
-
-const MEDICAL_POI_TYPES = new Set(["hospital", "clinic", "doctors", "pharmacy", "nursing_home"]);
-function isMedicalPoi(s) {
-  return s.class === "amenity" && MEDICAL_POI_TYPES.has(s.type);
-}
-
-// Résultats sans intérêt comme point de prise en charge/dépose (arrêts de bus, feux,
-// limites administratives de ville/région...) — ils polluent surtout les recherches
-// de lieux nommés, où le vrai lieu (ex: l'hôpital) se retrouve noyé parmi ses arrêts de bus.
-const NOISE_CLASSES = new Set(["boundary", "natural", "landuse", "waterway"]);
-const NOISE_HIGHWAY_TYPES = new Set(["bus_stop", "traffic_signals", "crossing", "give_way", "stop", "milestone", "street_lamp", "speed_camera"]);
-const NOISE_RAILWAY_TYPES = new Set(["platform", "stop", "signal", "switch"]);
-function isNoiseResult(s) {
-  if (NOISE_CLASSES.has(s.class)) return true;
-  if (s.class === "highway" && NOISE_HIGHWAY_TYPES.has(s.type)) return true;
-  if (s.class === "railway" && NOISE_RAILWAY_TYPES.has(s.type)) return true;
-  return false;
-}
-
-// Convertit un résultat de la Base Adresse Nationale (adresse.data.gouv.fr, service public
-// français) vers la même forme que les résultats Nominatim, pour réutiliser telles quelles
-// shortAddress/isNoiseResult/isMedicalPoi/rankAddressResults sur les deux sources combinées.
-// La BAN est bien plus tolérante aux fautes de frappe sur les adresses de rue que Nominatim
-// (base postale officielle avec recherche floue), mais ne connaît pas les noms de lieux
-// (hôpitaux, commerces...) — d'où la combinaison des deux plutôt qu'un remplacement.
-function banToAddressResult(feature) {
-  const p = feature.properties || {};
-  const [lon, lat] = feature.geometry?.coordinates || [null, null];
-  return {
-    place_id: `ban-${p.id || `${lat},${lon}`}`,
-    lat: String(lat),
-    lon: String(lon),
-    display_name: p.label,
-    class: "ban",
-    type: p.type,
-    namedetails: null,
-    address: {
-      house_number: p.housenumber,
-      road: p.street || (p.type === "street" ? p.name : undefined),
-      city: p.city,
-      postcode: p.postcode,
-    },
-  };
-}
-
-async function fetchBanSuggestions(query, here) {
-  const params = new URLSearchParams({ q: query, limit: "6" });
-  if (here) {
-    params.set("lat", String(here.lat));
-    params.set("lon", String(here.lng));
-  }
-  const res = await fetch(`https://api-adresse.data.gouv.fr/search/?${params.toString()}`);
-  const data = await res.json();
-  return (data.features || []).map(banToAddressResult);
-}
-
-// Alterne les deux sources plutôt que de tout concaténer : sinon les meilleurs résultats
-// de la seconde source (souvent le vrai lieu nommé côté Nominatim) se retrouvent noyés
-// derrière les six résultats, même médiocres, de la première.
-function interleaveResults(a, b) {
-  const out = [];
-  const len = Math.max(a.length, b.length);
-  for (let i = 0; i < len; i++) {
-    if (a[i]) out.push(a[i]);
-    if (b[i]) out.push(b[i]);
-  }
-  return out;
-}
-
-// Distance au-delà de laquelle on arrête de tenir compte de la proximité pour classer les
-// résultats : une course médicale part souvent vers un hôpital spécialisé à 50-100 km, et ce
-// résultat, pourtant le bon, ne doit pas être relégué derrière un résultat proche mais hors
-// sujet. Sous ce seuil, on se contente de séparer "plausible" de "loin" — sans retrier par
-// distance à l'intérieur du groupe, pour ne pas écraser le score de pertinence déjà calculé
-// par chaque service (score de la BAN, importance/proximité déjà appliquée par Nominatim).
-const NEARBY_RANK_RADIUS_KM = 60;
-
-// Filtre le bruit, sépare résultats plausibles/lointains, fait remonter un lieu nommé identifié
-// avec certitude (ex: la fiche OSM de l'hôpital) devant une simple correspondance partielle de
-// nom de rue (ex: une rue contenant "hôpital" dans son nom), puis déduplique les entrées
-// identiques une fois affichées (ex: l'hôpital et son arrêt de bus homonyme).
-function rankAddressResults(data, here) {
-  const filtered = data.filter((s) => !isNoiseResult(s));
-  // Si le filtrage a tout supprimé (requête très spécifique ne renvoyant que du "bruit"),
-  // mieux vaut afficher ces résultats que rien du tout.
-  const base = filtered.length > 0 ? filtered : data;
-  let ordered = base;
-  if (here) {
-    const withDist = base.map((s, idx) => ({
-      s,
-      idx,
-      d: distanceKm(here, { lat: parseFloat(s.lat), lng: parseFloat(s.lon) }),
-    }));
-    const near = withDist.filter((x) => x.d == null || x.d <= NEARBY_RANK_RADIUS_KM).sort((a, b) => a.idx - b.idx);
-    const far = withDist.filter((x) => x.d != null && x.d > NEARBY_RANK_RADIUS_KM).sort((a, b) => a.idx - b.idx);
-    ordered = [...near, ...far].map((x) => x.s);
-  }
-  const namedPois = ordered.filter((s) => s.namedetails?.name);
-  const others = ordered.filter((s) => !s.namedetails?.name);
-  ordered = [...namedPois, ...others];
-  const seen = new Set();
-  return ordered.filter((s) => {
-    const label = shortAddress(s);
-    if (seen.has(label)) return false;
-    seen.add(label);
-    return true;
-  });
-}
-
-// Distance à vol d'oiseau entre la position du chauffeur et un résultat de recherche brut,
-// affichée dans la liste de suggestions pour départager rapidement plusieurs résultats homonymes.
-function suggestionDistanceLabel(here, s) {
-  if (!here) return null;
-  const d = distanceKm(here, { lat: parseFloat(s.lat), lng: parseFloat(s.lon) });
-  if (d == null) return null;
-  return `${d < 10 ? d.toFixed(1) : Math.round(d)} km`;
-}
-
-// Adresses récemment sélectionnées (hôpitaux, cliniques habituels...) — stockées en local
-// pour être proposées instantanément dès le focus du champ, avant même de taper.
-const RECENT_ADDRESSES_KEY = "rp-recent-addresses";
-const MAX_RECENT_ADDRESSES = 6;
-
-function loadRecentAddresses() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(RECENT_ADDRESSES_KEY) || "[]");
-    return Array.isArray(raw) ? raw : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveRecentAddress(entry) {
-  const current = loadRecentAddresses();
-  const next = [
-    { ...entry, recent: true },
-    ...current.filter((r) => r.address !== entry.address),
-  ].slice(0, MAX_RECENT_ADDRESSES);
-  try {
-    localStorage.setItem(RECENT_ADDRESSES_KEY, JSON.stringify(next));
-  } catch (e) {
-    // Stockage indisponible (navigation privée...) : tant pis, pas bloquant.
-  }
-  return next;
-}
-
-function distanceKm(a, b) {
-  if (!a || !b || a.lat == null || b.lat == null) return null;
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const lat1 = (a.lat * Math.PI) / 180;
-  const lat2 = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.asin(Math.sqrt(h));
-}
-
-// Renvoie le point le plus précis disponible pour la prise en charge d'une
-// course : l'adresse de départ géocodée (précise) en priorité, sinon la
-// position du chauffeur au moment du post (ancienne méthode, moins précise,
-// gardée en secours pour les courses créées avant ce correctif).
-// Distance routière réelle via OSRM (service public gratuit, sans clé API,
-// mais non garanti à 100% en disponibilité — on retombe sur la distance à vol
-// d'oiseau si ça échoue ou met trop de temps, pour ne jamais bloquer le calcul).
-async function fetchRoadDistanceKm(from, to) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.code !== "Ok" || !data.routes?.[0]) return null;
-    return data.routes[0].distance / 1000; // mètres -> km
-  } catch (e) {
-    return null;
-  }
-}
-
-// Ouvre un PDF stocké en base64 de façon fiable sur mobile — un lien <a href
-// download> sur une "data URL" est souvent ignoré silencieusement par Safari
-// iOS. On passe par un Blob, que le navigateur sait afficher/télécharger
-// correctement dans un nouvel onglet.
-async function openPdfDocument(dataUrl, filename) {
-  try {
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const win = window.open(blobUrl, "_blank");
-    if (!win) {
-      const a = document.createElement("a");
-      a.href = blobUrl;
-      a.download = filename || "bon-transport.pdf";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-  } catch (e) {
-    window.open(dataUrl, "_blank");
-  }
-}
-
-function ridePickupCoords(r) {
-  if (r.departLat != null && r.departLng != null) return { lat: r.departLat, lng: r.departLng };
-  if (r.lat != null && r.lng != null) return { lat: r.lat, lng: r.lng };
-  return null;
-}
-
-// Liens d'itinéraire gratuits (aucune clé API nécessaire) — ouvrent l'appli
-// installée sur le téléphone si elle existe, sinon la version web.
-function wazeUrl(lat, lng, address) {
-  if (lat != null && lng != null) return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
-  return `https://waze.com/ul?q=${encodeURIComponent(address || "")}&navigate=yes`;
-}
-function googleMapsUrl(lat, lng, address) {
-  if (lat != null && lng != null) return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address || "")}`;
-}
-
-// Calcule le tarif "Taxi conventionné" selon la convention nationale 2025
-// (page tarifs officielle fournie par l'utilisateur). Approximation basée sur
-// la distance à vol d'oiseau entre départ et arrivée (pas la distance
-// routière réelle, généralement un peu plus longue) — à vérifier avant de facturer.
-// Ordre officiel : le tarif km (majoré si retour à vide) s'ajoute au forfait PEC
-// et au forfait grande ville, puis la majoration nuit/weekend/férié s'applique
-// sur l'ensemble ; le supplément TPMR s'ajoute en tout dernier (hors majoration).
-function computeTaxiConventionneTarif({ distKm, allerRetour, kmRate, grandeVille, majoration, retourAVide, tpmr }) {
-  if (distKm == null) return null;
-  const totalKm = allerRetour ? distKm * 2 : distKm;
-  const billableKm = Math.max(0, totalKm - TAXI_FRANCHISE_KM);
-  let kmPortion = billableKm * kmRate;
-  if (retourAVide) {
-    const majo = totalKm < TAXI_RETOUR_A_VIDE_SEUIL_KM
-      ? TAXI_RETOUR_A_VIDE_MAJORATION_COURT
-      : TAXI_RETOUR_A_VIDE_MAJORATION_LONG;
-    kmPortion *= 1 + majo;
-  }
-  let total = TAXI_FORFAIT_PEC + kmPortion;
-  if (grandeVille) total += TAXI_FORFAIT_GRANDE_VILLE;
-  if (majoration) total *= 1 + TAXI_MAJORATION_NUIT_WEEKEND;
-  if (tpmr) total += TAXI_TPMR_SUPPLEMENT;
-  return Math.round(total * 100) / 100;
-}
-
-// Détecte automatiquement si l'heure de prise en charge tombe dans la plage
-// "nuit/dimanche" de la convention (20h-8h, ou samedi à partir de 12h, ou dimanche).
-// Les jours fériés ne peuvent pas être détectés automatiquement (pas de calendrier
-// intégré) — le chauffeur garde la main pour cocher/décocher manuellement ensuite.
-function autoDetectNightWeekend(heureStr) {
-  if (!heureStr) return false;
-  const [h] = heureStr.split(":").map(Number);
-  if (Number.isNaN(h)) return false;
-  const day = new Date().getDay(); // 0 = dimanche, 6 = samedi
-  const isNight = h >= 20 || h < 8;
-  const isWeekend = day === 0 || (day === 6 && h >= 12);
-  return isNight || isWeekend;
-}
-
-// Extrait la commune et le département d'un résultat de recherche d'adresse (Nominatim ou BAN,
-// mêmes clés depuis banToAddressResult) — utilisé pour détecter automatiquement le forfait
-// "grande ville" de la convention taxi conventionné.
-function addressCityDept(item) {
-  const a = item.address || {};
-  const city = a.village || a.town || a.city || a.municipality || a.suburb || "";
-  const postcode = a.postcode || "";
-  return { city, dept: postcode ? postcode.slice(0, 2) : "" };
-}
-
-// Villes et départements ouvrant droit au forfait "grande ville" (+15 €) — arrêté du
-// 29 juillet 2025 portant approbation de la convention-cadre nationale taxi/Assurance Maladie.
-// La CPAM publie aussi une liste d'établissements "limitrophes" à ces communes qui en
-// bénéficient par exception : cette détection automatique ne les couvre pas, la case reste
-// donc modifiable à la main pour ces cas particuliers.
-const GRANDE_VILLE_CITIES = new Set([
-  "marseille", "paris", "nice", "toulouse", "lyon", "strasbourg",
-  "montpellier", "rennes", "bordeaux", "lille", "grenoble", "nantes",
-]);
-const GRANDE_VILLE_DEPTS = new Set(["92", "93", "94"]);
-
-function normalizeCityName(s) {
-  return (s || "").toLowerCase().trim();
-}
-
-function isGrandeVilleZone(city, dept) {
-  if (dept && GRANDE_VILLE_DEPTS.has(dept)) return true;
-  const norm = normalizeCityName(city);
-  if (!norm) return false;
-  // Gère les arrondissements ("Paris 15e", "Lyon 3e"...) en plus du nom seul.
-  for (const c of GRANDE_VILLE_CITIES) {
-    if (norm === c || norm.startsWith(c + " ") || norm.startsWith(c + "-")) return true;
-  }
-  return false;
-}
-
-function stripAccents(s) {
-  return Array.from((s || "").normalize("NFD"))
-    .filter((ch) => ch.codePointAt(0) < 0x0300 || ch.codePointAt(0) > 0x036f)
-    .join("");
-}
-
-// Établissements limitrophes bénéficiant du forfait "grande ville" par exception malgré une
-// commune hors de la liste officielle — validés par la Cnam (liste des établissements par
-// extension au 01/04/2026, publiée sur ameli.fr). Le service de recherche d'adresse utilisé par
-// l'appli ne référence pas correctement tous ces établissements (ex: UGECAM Illkirch n'apparaît
-// que comme un arrêt de bus, Clinique du Ried pas du tout), d'où une détection sur le texte de
-// l'adresse saisie plutôt que sur la commune géocodée. Chaque entrée est un groupe de mots-clés
-// qui doivent TOUS apparaître, pour éviter les faux positifs (ex: "Ugecam" seul existe dans
-// plusieurs villes en France qui ne bénéficient pas du forfait).
-const GRANDE_VILLE_EXTENSION_MATCHERS = [
-  ["cmco"], // Centre Médico-Chirurgical et Obstétrical, Schiltigheim
-  ["medico-chirurgical", "schiltigheim"], // même établissement, nom complet
-  ["ugecam", "illkirch"], // UGECAM Alsace, Illkirch
-  ["clinique du ried"], // Clinique du Ried, Schiltigheim
-];
-
-function matchesGrandeVilleExtension(addressText) {
-  const norm = stripAccents((addressText || "").toLowerCase());
-  return GRANDE_VILLE_EXTENSION_MATCHERS.some((group) => group.every((kw) => norm.includes(kw)));
-}
-
-// Silhouette d'un véhicule (taxi / VSL / ambulance) pour le fond de l'écran de connexion.
-// `withCross` ajoute la croix d'ambulance, `roofSign` la plaque taxi lumineuse.
-function VehicleSilhouette({ x, y, scale = 1, color, withCross, roofSign }) {
-  return (
-    <g transform={`translate(${x},${y}) scale(${scale})`}>
-      {roofSign && <rect x={44} y={-16} width={22} height={9} rx={2.5} fill={color} opacity={0.9} />}
-      <path
-        d="M6,34 C2,34 0,31 0,27 L0,20 C0,16 2,13 6,11 L22,11 L34,-6 C36,-9 39,-10 43,-10 L88,-10 C92,-10 95,-8 96,-4 L100,11 L114,11 C118,11 120,14 120,18 L120,27 C120,31 118,34 114,34 Z"
-        fill={color}
-      />
-      <path d="M38,-6 L46,-6 L42,10 L30,10 Z" fill="#0F1114" opacity={0.55} />
-      <path d="M52,-6 L82,-6 L86,10 L52,10 Z" fill="#0F1114" opacity={0.55} />
-      {withCross && (
-        <g transform="translate(64,12)">
-          <rect x={-3} y={-9} width={6} height={18} rx={1.5} fill="#F2F4F7" />
-          <rect x={-9} y={-3} width={18} height={6} rx={1.5} fill="#F2F4F7" />
-        </g>
-      )}
-      <circle cx={26} cy={34} r={11} fill="#15181D" />
-      <circle cx={26} cy={34} r={4.5} fill="#3A4048" />
-      <circle cx={94} cy={34} r={11} fill="#15181D" />
-      <circle cx={94} cy={34} r={4.5} fill="#3A4048" />
-    </g>
-  );
-}
-
-// Ligne ondulée (texture de fond de l'écran de démarrage) échantillonnée sur une sinusoïde.
-function wavePath(yBase, amp, freq, phase, width = 400, steps = 48) {
-  let d = `M0,${(yBase + amp * Math.sin(phase)).toFixed(1)}`;
-  for (let i = 1; i <= steps; i++) {
-    const x = (width / steps) * i;
-    const y = yBase + amp * Math.sin((i / steps) * Math.PI * 2 * freq + phase);
-    d += ` L${x.toFixed(1)},${y.toFixed(1)}`;
-  }
-  return d;
-}
-
-// Écran de démarrage affiché une fois par session avant le formulaire de connexion :
-// logo, nom de l'appli, illustration des 3 types de véhicules pris en charge, puis un
-// bouton pour continuer. `splashSeen` (sessionStorage) évite de le réafficher à chaque
-// rechargement pendant la même session.
-function AuthSplash({ onChoose }) {
-  const waveLines = React.useMemo(() => {
-    const lines = [];
-    for (let i = 0; i < 15; i++) {
-      lines.push({
-        d: wavePath(30 + i * 42, 12 + (i % 3) * 5, 1.3 + (i % 4) * 0.25, i * 0.55, 400, 48),
-        opacity: 0.05 + (i % 3) * 0.025,
-      });
-    }
-    return lines;
-  }, []);
-
-  return (
-    <div style={{ position: "fixed", inset: 0, overflow: "hidden", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-      {/* position:fixed + inset:0 plutôt que 100vh : sur mobile (Safari/Chrome), 100vh compte
-          la hauteur avec la barre d'adresse repliée, donc le contenu déborde et se retrouve
-          décentré tant qu'on n'a pas scrollé — ça colle toujours exactement à l'écran visible. */}
-      <style>{`
-        @keyframes rpSplashIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-        .rp-splash-fade { animation: rpSplashIn 0.55s ease-out both; }
-      `}</style>
-      <svg
-        viewBox="0 0 400 860"
-        preserveAspectRatio="xMidYMid slice"
-        style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: 0 }}
-        aria-hidden="true"
-      >
-        <defs>
-          <linearGradient id="splashBgGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#0B0E1A" />
-            <stop offset="55%" stopColor="#10142A" />
-            <stop offset="100%" stopColor="#161B33" />
-          </linearGradient>
-        </defs>
-        <rect width={400} height={860} fill="url(#splashBgGrad)" />
-        {waveLines.map((w, i) => (
-          <path key={i} d={w.d} stroke="#8FA6FF" strokeWidth={1} fill="none" opacity={w.opacity} />
-        ))}
-      </svg>
-
-      <div
-        className="rp-splash-fade"
-        style={{
-          position: "relative", zIndex: 1, height: "100%", boxSizing: "border-box",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          padding: "calc(env(safe-area-inset-top, 0px) + 20px) 22px calc(env(safe-area-inset-bottom, 0px) + 20px)",
-          textAlign: "center", gap: 0, overflowY: "auto",
-        }}
-      >
-        <div style={{ ...styles.logoBadgeLarge, width: 52, height: 52, margin: "0 auto 10px", boxShadow: "0 0 36px rgba(255,180,58,0.45)" }}>
-          <Car size={24} color="#1A1206" />
-          <span style={styles.logoBeaconLarge} />
-        </div>
-
-        <h1 style={{ fontFamily: "'Manrope', sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: 0.2, margin: 0 }}>
-          <span style={{ color: "#F2F4F7" }}>Roule</span>
-          <span style={{ color: "#FFB43A" }}>Partner</span>
-        </h1>
-
-        <div style={{ display: "flex", width: 90, height: 3, borderRadius: 2, overflow: "hidden", margin: "9px 0 9px" }}>
-          <span style={{ flex: 1, background: "#4169E1" }} />
-          <span style={{ flex: 1, background: "#F2F4F7" }} />
-          <span style={{ flex: 1, background: "#E5484D" }} />
-        </div>
-
-        <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2.5, color: "#9AA4C7", textTransform: "uppercase", margin: 0 }}>
-          Signalez · Partagez · Roulez
-        </p>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "100%", margin: "14px 0" }}>
-          <svg viewBox="0 0 400 160" width="100%" style={{ maxWidth: 260 }} aria-hidden="true">
-            <defs>
-              <linearGradient id="vehGradTaxi" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#FFC968" />
-                <stop offset="100%" stopColor="#F0A020" />
-              </linearGradient>
-              <linearGradient id="vehGradAmb" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#F0897A" />
-                <stop offset="100%" stopColor="#D85242" />
-              </linearGradient>
-              <linearGradient id="vehGradVsl" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#5FE096" />
-                <stop offset="100%" stopColor="#28A860" />
-              </linearGradient>
-              <radialGradient id="vehShadow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#000" stopOpacity={0.45} />
-                <stop offset="100%" stopColor="#000" stopOpacity={0} />
-              </radialGradient>
-            </defs>
-            <ellipse cx={70} cy={148} rx={55} ry={9} fill="url(#vehShadow)" />
-            <ellipse cx={210} cy={152} rx={65} ry={10} fill="url(#vehShadow)" />
-            <ellipse cx={345} cy={148} rx={50} ry={9} fill="url(#vehShadow)" />
-            <VehicleSilhouette x={16} y={110} scale={0.82} color="url(#vehGradTaxi)" roofSign />
-            <VehicleSilhouette x={150} y={104} scale={1} color="url(#vehGradAmb)" withCross />
-            <VehicleSilhouette x={292} y={112} scale={0.76} color="url(#vehGradVsl)" />
-          </svg>
-        </div>
-
-        <p style={{ fontSize: 13.5, color: "#C6CCE6", lineHeight: 1.4, maxWidth: 300, margin: 0 }}>
-          Taxi, VSL, ambulance : partagez vos courses entre pros, fini les groupes WhatsApp.
-        </p>
-
-        <div style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 12px", borderRadius: 20, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
-          <span style={{ width: 16, height: 11, borderRadius: 2, background: "linear-gradient(to right, #0055A4 33%, #fff 33% 66%, #EF4135 66%)" }} />
-          <span style={{ fontSize: 11.5, color: "#C6CCE6" }}>Plateforme 100% française</span>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, width: "100%", maxWidth: 320, marginTop: 18 }}>
-          <button
-            type="button"
-            onClick={() => onChoose("login")}
-            style={{ ...styles.btnPrimary, flex: 1, justifyContent: "center" }}
-          >
-            Se connecter
-          </button>
-          <button
-            type="button"
-            onClick={() => onChoose("signup")}
-            style={{ ...styles.btnGhost, flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}
-          >
-            S'inscrire
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Fond fixe (dégradé + halos de couleur) derrière la carte de connexion.
-function AuthBackdrop() {
-  return (
-    <svg
-      viewBox="0 0 400 820"
-      preserveAspectRatio="xMidYMid slice"
-      style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: 0, pointerEvents: "none" }}
-      aria-hidden="true"
-    >
-      <defs>
-        <linearGradient id="authBgGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#0F1114" />
-          <stop offset="60%" stopColor="#101317" />
-          <stop offset="100%" stopColor="#15181D" />
-        </linearGradient>
-        <radialGradient id="authGlowAmber" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#FFB43A" stopOpacity={0.3} />
-          <stop offset="100%" stopColor="#FFB43A" stopOpacity={0} />
-        </radialGradient>
-        <radialGradient id="authGlowGreen" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#3BD07A" stopOpacity={0.24} />
-          <stop offset="100%" stopColor="#3BD07A" stopOpacity={0} />
-        </radialGradient>
-      </defs>
-      <rect width={400} height={820} fill="url(#authBgGrad)" />
-      <circle cx={40} cy={120} r={220} fill="url(#authGlowAmber)" />
-      <circle cx={370} cy={200} r={200} fill="url(#authGlowGreen)" />
-    </svg>
-  );
-}
-
-// Bandeau "route" avec taxi / ambulance / VSL, placé sous la carte de connexion
-// (dans le flux normal de la page, pas en fond superposé) pour rester visible
-// même sur un écran mobile étroit où la carte occupe presque toute la largeur.
-function AuthVehicleStrip() {
-  return (
-    <div
-      style={{
-        position: "relative",
-        zIndex: 1,
-        maxWidth: 380,
-        margin: "0 auto 24px",
-        borderRadius: 14,
-        overflow: "hidden",
-        border: "1px solid #23272E",
-        boxShadow: "0 12px 30px rgba(0,0,0,0.4)",
-      }}
-    >
-      <svg viewBox="0 0 400 140" width="100%" height="140" aria-hidden="true">
-        <rect width={400} height={140} fill="#131519" />
-        {Array.from({ length: 9 }).map((_, i) => (
-          <rect key={i} x={i * 46 + 6} y={28} width={22} height={3} rx={1.5} fill="#2A2F36" />
-        ))}
-        <VehicleSilhouette x={16} y={84} scale={0.78} color="#FFB43A" roofSign />
-        <VehicleSilhouette x={150} y={78} scale={0.94} color="#E86E5E" withCross />
-        <VehicleSilhouette x={290} y={86} scale={0.72} color="#3BD07A" />
-      </svg>
-    </div>
-  );
-}
+import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
+import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
+import { formatPostedAt, dateKey, todayKey, timePlusMinutes, formatRideDate, FRENCH_MONTHS, formatDayMonth, FRENCH_WEEKDAYS_SHORT, keyFromDate, dateFromKey, addDaysKey, startOfWeekKey, rideTimingBadge, thisWeekRange } from "./lib/dates";
+import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyNewMessage } from "./lib/alerts";
+import { loadRideDraft, saveRideDraft, clearRideDraft, loadRecentAddresses, saveRecentAddress } from "./lib/storage";
+import { computePriorityDrivers, distanceKm, fetchRoadDistanceKm, ridePickupCoords, wazeUrl, googleMapsUrl, cardLocality, shortAddress, isMedicalPoi, fetchBanSuggestions, interleaveResults, rankAddressResults, suggestionDistanceLabel } from "./lib/geo";
+import { compressPhoto, openPdfDocument } from "./lib/files";
+import { AuthSplash, AuthBackdrop, AuthVehicleStrip } from "./components/AuthScreens";
+import { styles } from "./styles";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -1155,6 +67,25 @@ export default function App() {
   const chatEndRef = useRef(null);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
   const [showMyCoursesPanel, setShowMyCoursesPanel] = useState(false);
+  // Thème : "auto" (suit le téléphone), "light" ou "dark". main.jsx l'applique déjà au
+  // démarrage ; ici on le garde à jour quand le chauffeur le change dans Réglages.
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem("rp-theme") || "auto";
+    } catch (e) {
+      return "auto";
+    }
+  });
+  useEffect(() => {
+    if (theme === "auto") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("rp-theme", theme);
+    } catch (e) {
+      // ignore
+    }
+  }, [theme]);
+
   const [myCoursesView, setMyCoursesView] = useState("liste"); // "liste" | "calendrier"
   const [calPeriod, setCalPeriod] = useState("jour"); // "jour" | "semaine" | "mois"
   const [calAnchor, setCalAnchor] = useState(() => todayKey(0));
@@ -2275,14 +1206,14 @@ export default function App() {
         // On ne touche à l'icône que si le statut a vraiment changé — la
         // recréer à chaque mise à jour de position perturbait le zoom sur la carte.
         if (mapMarkerStatusRef.current[name] !== statusKey) {
-          const carBg = isMe ? "#FFB43A" : "#23272E";
+          const carBg = isMe ? "#FFB43A" : "var(--border-subtle)";
           const statusColor = isBusy ? "#E5484D" : "#3BD07A";
           mapMarkersRef.current[name].setIcon(L.divIcon({
             className: "",
             html: `
               <div style="position:relative;width:34px;height:34px;">
-                <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid #0F1114;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
-                <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid #0F1114;"></span>
+                <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid var(--bg-screen);box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
+                <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid var(--bg-screen);"></span>
               </div>
             `,
             iconSize: [34, 34],
@@ -2291,14 +1222,14 @@ export default function App() {
           mapMarkerStatusRef.current[name] = statusKey;
         }
       } else {
-        const carBg = isMe ? "#FFB43A" : "#23272E";
+        const carBg = isMe ? "#FFB43A" : "var(--border-subtle)";
         const statusColor = isBusy ? "#E5484D" : "#3BD07A";
         const icon = L.divIcon({
           className: "",
           html: `
             <div style="position:relative;width:34px;height:34px;">
-              <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid #0F1114;box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
-              <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid #0F1114;"></span>
+              <div style="background:${carBg};width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;border:2px solid var(--bg-screen);box-shadow:0 2px 6px rgba(0,0,0,0.4);">🚗</div>
+              <span style="position:absolute;top:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:${statusColor};border:2px solid var(--bg-screen);"></span>
             </div>
           `,
           iconSize: [34, 34],
@@ -2463,7 +1394,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div style={styles.pageAuth}>
+      <div className="rp-force-dark" style={styles.pageAuth}>
         <AuthBackdrop />
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
@@ -2482,7 +1413,7 @@ export default function App() {
       return <AuthSplash onChoose={(mode) => { setAuthMode(mode); dismissSplash(); }} />;
     }
     return (
-      <div style={styles.pageAuth}>
+      <div className="rp-force-dark" style={styles.pageAuth}>
         <AuthBackdrop />
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
@@ -2570,13 +1501,13 @@ export default function App() {
                 type="button"
                 onClick={handleForgotPassword}
                 disabled={authBusy}
-                style={{ background: "none", border: "none", color: "#8A9099", fontSize: 12.5, textAlign: "right", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                style={{ background: "none", border: "none", color: "var(--text-muted)", fontSize: 12.5, textAlign: "right", cursor: "pointer", padding: 0, textDecoration: "underline" }}
               >
                 Mot de passe oublié ?
               </button>
             )}
             {resetSent && (
-              <span style={{ color: "#3BD07A", fontSize: 13 }}>
+              <span style={{ color: "var(--positive-text)", fontSize: 13 }}>
                 Si un compte existe avec cet email, un lien de réinitialisation vient d'être envoyé.
               </span>
             )}
@@ -2593,7 +1524,7 @@ export default function App() {
 
   if (!user.emailVerified) {
     return (
-      <div style={styles.pageAuth}>
+      <div className="rp-force-dark" style={styles.pageAuth}>
         <AuthBackdrop />
         <div style={styles.gateCard}>
           <div style={styles.logoBadgeLarge}>
@@ -2679,6 +1610,7 @@ export default function App() {
               : r.status === "en_attente" ? "En attente"
               : r.status === "en_cours" ? "En cours"
               : r.status === "terminee" ? "Terminée"
+              : r.status === "prise" ? "Prise"
               : r.status}
           </span>
         </div>
@@ -2686,12 +1618,12 @@ export default function App() {
           <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 8, flexShrink: 0, padding: "4px 0" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-              <span style={{ flex: 1, width: 2, minHeight: 16, background: "#3A4048", margin: "3px 0", borderRadius: 1 }} />
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+              <span style={{ flex: 1, width: 2, minHeight: 16, background: "var(--border-outline)", margin: "3px 0", borderRadius: 1 }} />
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--text-faint)", flexShrink: 0 }} />
             </div>
             <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14, minWidth: 0, flex: 1 }}>
-              <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.depart)}</span>
-              <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
+              <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.depart)}</span>
+              <span style={{ fontWeight: 600, fontSize: 15, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
             </div>
           </div>
           {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
@@ -2747,16 +1679,16 @@ export default function App() {
         onClick={() => { setSelectedRide(r); setShowMyCoursesPanel(false); }}
         style={{
           display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-          background: "#0F1114", border: "1px solid #23272E", borderLeft: `3px solid ${meta.color}`,
+          background: "var(--bg-screen)", border: "1px solid var(--border-subtle)", borderLeft: `3px solid ${meta.color}`,
           borderRadius: 10, padding: "10px 12px",
         }}
       >
-        <span className="rp-meter" style={{ fontSize: 15, fontWeight: 800, color: "#F2F4F7", minWidth: 44 }}>{r.heure || "--:--"}</span>
+        <span className="rp-meter" style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)", minWidth: 44 }}>{r.heure || "--:--"}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {cardLocality(r.depart)} → {cardLocality(r.arrivee)}
           </div>
-          <div style={{ fontSize: 12, color: "#8A9099", marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
             {meta.label} · {isTaken ? "Prise" : "Donnée"}
             {r.status === "terminee" ? " · Terminée" : r.status === "en_cours" ? " · En cours" : r.status === "en_attente" ? " · En attente" : ""}
           </div>
@@ -2769,7 +1701,7 @@ export default function App() {
   const renderCalDayList = (key) => {
     const list = calRidesByDay[key] || [];
     return list.length === 0 ? (
-      <p style={{ color: "#6E757E", fontSize: 13, margin: "4px 0 0" }}>Aucune course ce jour-là.</p>
+      <p style={{ color: "var(--text-faint)", fontSize: 13, margin: "4px 0 0" }}>Aucune course ce jour-là.</p>
     ) : (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{list.map(renderCalRideRow)}</div>
     );
@@ -2783,7 +1715,7 @@ export default function App() {
         onClick={() => { setCalPeriod(id); if (id === "mois") setCalSelectedDay(calAnchor); }}
         style={{
           flex: 1, border: "none", borderRadius: 8, padding: "9px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer",
-          background: calPeriod === id ? "#FFB43A" : "transparent", color: calPeriod === id ? "#1A1206" : "#B8BEC6",
+          background: calPeriod === id ? "#FFB43A" : "transparent", color: calPeriod === id ? "#1A1206" : "var(--text-tertiary)",
         }}
       >
         {label}
@@ -2801,11 +1733,11 @@ export default function App() {
             const count = (calRidesByDay[key] || []).length;
             return (
               <div key={key}>
-                <div style={{ ...styles.myCoursesSectionTitle, color: key === today ? "#FFB43A" : "#8A9099", marginBottom: 8 }}>
+                <div style={{ ...styles.myCoursesSectionTitle, color: key === today ? "var(--accent-text)" : "var(--text-muted)", marginBottom: 8 }}>
                   {FRENCH_WEEKDAYS_SHORT[dateFromKey(key).getDay()]} {formatDayMonth(key)}
-                  {count > 0 && <span style={{ color: "#6E757E" }}>· {count}</span>}
+                  {count > 0 && <span style={{ color: "var(--text-faint)" }}>· {count}</span>}
                 </div>
-                {count > 0 ? renderCalDayList(key) : <div style={{ height: 1, background: "#1B1E23" }} />}
+                {count > 0 ? renderCalDayList(key) : <div style={{ height: 1, background: "var(--divider)" }} />}
               </div>
             );
           })}
@@ -2821,7 +1753,7 @@ export default function App() {
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 16 }}>
             {["L", "M", "M", "J", "V", "S", "D"].map((l, i) => (
-              <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 800, color: "#6E757E", paddingBottom: 4 }}>{l}</div>
+              <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 800, color: "var(--text-faint)", paddingBottom: 4 }}>{l}</div>
             ))}
             {Array.from({ length: cellCount }, (_, i) => addDaysKey(gridStart, i)).map((key) => {
               const inMonth = dateFromKey(key).getMonth() === a.getMonth();
@@ -2832,10 +1764,10 @@ export default function App() {
                   key={key}
                   onClick={() => setCalSelectedDay(key)}
                   style={{
-                    aspectRatio: "1", border: key === today ? "1.5px solid #FFB43A" : "1px solid #23272E",
+                    aspectRatio: "1", border: key === today ? "1.5px solid #FFB43A" : "1px solid var(--border-subtle)",
                     borderRadius: 8, cursor: "pointer", padding: 0,
-                    background: selected ? "#FFB43A" : "#0F1114",
-                    color: selected ? "#1A1206" : inMonth ? "#E4E7EB" : "#4A5058",
+                    background: selected ? "#FFB43A" : "var(--bg-screen)",
+                    color: selected ? "#1A1206" : inMonth ? "var(--text-secondary)" : "var(--text-disabled)",
                     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
                     fontSize: 13.5, fontWeight: 700,
                   }}
@@ -2844,7 +1776,7 @@ export default function App() {
                   <span style={{
                     minWidth: 16, height: 16, borderRadius: 8, fontSize: 10, fontWeight: 800, lineHeight: "16px",
                     background: count ? (selected ? "#1A1206" : "#FFB43A") : "transparent",
-                    color: selected ? "#FFB43A" : "#1A1206",
+                    color: selected ? "var(--accent-text)" : "#1A1206",
                   }}>
                     {count || ""}
                   </span>
@@ -2862,7 +1794,7 @@ export default function App() {
 
     return (
       <>
-        <div style={{ display: "flex", gap: 4, background: "#191C21", borderRadius: 10, padding: 4, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 4, background: "var(--surface-card)", borderRadius: 10, padding: 4, marginBottom: 14 }}>
           {periodBtn("jour", "Aujourd'hui")}
           {periodBtn("semaine", "Semaine")}
           {periodBtn("mois", "Mois")}
@@ -2870,10 +1802,10 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 16 }}>
           <button onClick={() => calShift(-1)} style={styles.wizardNavBtn} aria-label="Précédent"><ChevronLeft size={20} /></button>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontWeight: 800, fontSize: 15.5, color: "#F2F4F7", textTransform: calPeriod === "mois" ? "capitalize" : "none" }}>{calTitle}</div>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: "var(--text-primary)", textTransform: calPeriod === "mois" ? "capitalize" : "none" }}>{calTitle}</div>
             <button
               onClick={() => { setCalAnchor(today); setCalSelectedDay(today); }}
-              style={{ background: "none", border: "none", color: "#FFB43A", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}
+              style={{ background: "none", border: "none", color: "var(--accent-text)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}
             >
               Revenir à aujourd'hui
             </button>
@@ -3039,7 +1971,7 @@ export default function App() {
             <Car size={18} color="#1A1206" />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-            <h1 style={styles.title}>Roule<span style={{ color: "#3BD07A" }}>Partner</span></h1>
+            <h1 style={styles.title}>Roule<span style={{ color: "var(--positive-text)" }}>Partner</span></h1>
             <span style={styles.headerSubtitle}>
               {driverName}{profiles[driverName]?.commune ? ` · ${profiles[driverName].commune}` : ""}
             </span>
@@ -3064,7 +1996,7 @@ export default function App() {
             {myPosStatus === "ok" ? "ON" : myPosStatus === "locating" ? "Localisation…" : "OFF"}
             <span style={{
               position: "relative", width: 34, height: 20, borderRadius: 999, flexShrink: 0,
-              background: myPosStatus === "ok" ? "#3BD07A" : "#3A4048",
+              background: myPosStatus === "ok" ? "#3BD07A" : "var(--border-outline)",
               transition: "background 0.2s",
             }}>
               <span style={{
@@ -3112,10 +2044,10 @@ export default function App() {
             >
               <Car size={18} color={r.status === "en_cours" ? "#FFB43A" : "#3BD07A"} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.2, color: r.status === "en_cours" ? "#FFB43A" : "#3BD07A" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.2, color: r.status === "en_cours" ? "var(--accent-text)" : "var(--positive-text)" }}>
                   {r.status === "en_cours" ? "COURSE EN COURS" : "TA COURSE À PRENDRE EN CHARGE"}
                 </div>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {cardLocality(r.depart)} → {cardLocality(r.arrivee)}
                 </div>
               </div>
@@ -3137,19 +2069,19 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 }}>
               <button
                 onClick={() => setDateFilter(dateFilter === todayKey(0) ? "" : todayKey(0))}
-                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(0) ? "#FFB43A" : "#3A4048", background: dateFilter === todayKey(0) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(0) ? "#1A1206" : "#B8BEC6" }}
+                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(0) ? "#FFB43A" : "var(--border-outline)", background: dateFilter === todayKey(0) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(0) ? "#1A1206" : "var(--text-tertiary)" }}
               >
                 Aujourd'hui
               </button>
               <button
                 onClick={() => setDateFilter(dateFilter === todayKey(1) ? "" : todayKey(1))}
-                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(1) ? "#FFB43A" : "#3A4048", background: dateFilter === todayKey(1) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(1) ? "#1A1206" : "#B8BEC6" }}
+                style={{ ...styles.togglePill, borderColor: dateFilter === todayKey(1) ? "#FFB43A" : "var(--border-outline)", background: dateFilter === todayKey(1) ? "#FFB43A" : "transparent", color: dateFilter === todayKey(1) ? "#1A1206" : "var(--text-tertiary)" }}
               >
                 Demain
               </button>
               <button
                 onClick={() => setDateFilter(dateFilter === "week" ? "" : "week")}
-                style={{ ...styles.togglePill, borderColor: dateFilter === "week" ? "#FFB43A" : "#3A4048", background: dateFilter === "week" ? "#FFB43A" : "transparent", color: dateFilter === "week" ? "#1A1206" : "#B8BEC6" }}
+                style={{ ...styles.togglePill, borderColor: dateFilter === "week" ? "#FFB43A" : "var(--border-outline)", background: dateFilter === "week" ? "#FFB43A" : "transparent", color: dateFilter === "week" ? "#1A1206" : "var(--text-tertiary)" }}
               >
                 Cette semaine
               </button>
@@ -3173,7 +2105,7 @@ export default function App() {
             <div style={styles.sectionDivider} />
             <div style={styles.sectionLabel}>Rayon</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 }}>
-              <p style={{ color: "#8A9099", fontSize: 12.5, margin: "0 0 2px" }}>
+              <p style={{ color: "var(--text-muted)", fontSize: 12.5, margin: "0 0 2px" }}>
                 Ne montrer que les courses dans ce rayon autour de toi (nécessite d'être "en service").
               </p>
               {["15", "30", "50", "100", "all"].map((v) => (
@@ -3182,8 +2114,8 @@ export default function App() {
                   onClick={() => updateRadiusFilter(v)}
                   style={{
                     ...styles.togglePill, width: "100%", justifyContent: "flex-start",
-                    borderColor: radiusFilter === v ? "#FFB43A" : "#3A4048",
-                    color: radiusFilter === v ? "#1A1206" : "#B8BEC6",
+                    borderColor: radiusFilter === v ? "#FFB43A" : "var(--border-outline)",
+                    color: radiusFilter === v ? "#1A1206" : "var(--text-tertiary)",
                     background: radiusFilter === v ? "#FFB43A" : "transparent",
                   }}
                 >
@@ -3201,8 +2133,8 @@ export default function App() {
                   onClick={() => { setFilter(filter === t.id ? "dispo" : t.id); setShowFiltersPanel(false); }}
                   style={{
                     ...styles.togglePill, width: "100%", justifyContent: "flex-start", gap: 8,
-                    borderColor: filter === t.id ? "#FFB43A" : "#3A4048",
-                    color: filter === t.id ? "#1A1206" : "#B8BEC6",
+                    borderColor: filter === t.id ? "#FFB43A" : "var(--border-outline)",
+                    color: filter === t.id ? "#1A1206" : "var(--text-tertiary)",
                     background: filter === t.id ? "#FFB43A" : "transparent",
                   }}
                 >
@@ -3221,7 +2153,7 @@ export default function App() {
               <h2 style={{ ...styles.modalTitle, display: "flex", alignItems: "center", gap: 8 }}><Bell size={18} /> Notifications</h2>
               <button onClick={() => setShowNotifPanel(false)} style={styles.iconBtn}><X size={16} /></button>
             </div>
-            <p style={{ color: "#8A9099", fontSize: 13.5, lineHeight: 1.5 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13.5, lineHeight: 1.5 }}>
               Rien pour l'instant — cet espace accueillera bientôt les notifications de l'appli.
             </p>
           </div>
@@ -3307,8 +2239,8 @@ export default function App() {
                         onClick={() => setForm({ ...form, type: t.id })}
                         style={{
                           display: "flex", flexDirection: "column", alignItems: "center", gap: 7,
-                          background: form.type === t.id ? tintBg(t.color, 0.12) : "#191C21",
-                          border: `1.5px solid ${form.type === t.id ? t.color : "#23272E"}`,
+                          background: form.type === t.id ? tintBg(t.color, 0.12) : "var(--surface-card)",
+                          border: `1.5px solid ${form.type === t.id ? t.color : "var(--border-subtle)"}`,
                           borderRadius: 13, padding: "12px 5px", cursor: "pointer", textAlign: "center", minHeight: 82,
                           position: "relative",
                         }}
@@ -3323,7 +2255,7 @@ export default function App() {
                         }}>
                           <t.icon size={17} color={t.color} />
                         </span>
-                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "#F2F4F7", lineHeight: 1.2 }}>{t.label}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.2 }}>{t.label}</span>
                       </button>
                     ))}
                   </div>
@@ -3331,7 +2263,7 @@ export default function App() {
                   <div style={styles.formLabel}>Trajet</div>
                   <div style={styles.routeCard}>
                     <div style={{ position: "relative" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 46px 20px 16px", borderBottom: "1px solid #23272E" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 46px 20px 16px", borderBottom: "1px solid var(--border-subtle)" }}>
                         <span style={{ width: 11, height: 11, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
                         <input
                           style={{ ...styles.routeRowInput, fontSize: 17.5, fontWeight: 700 }}
@@ -3351,13 +2283,13 @@ export default function App() {
                       </div>
                       {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
                         <div style={styles.suggestionBox}>
-                          <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
+                          <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default" }}>Recherche…</div>
                         </div>
                       )}
                       {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
                         <div style={styles.suggestionBox}>
                           {form.depart.trim().length < 3 && (
-                            <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
+                            <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid var(--border-subtle)" }}>
                               Adresses récentes
                             </div>
                           )}
@@ -3369,13 +2301,13 @@ export default function App() {
                             return (
                               <div
                                 key={isRecent ? `recent-${s.address}` : s.place_id}
-                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
+                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "var(--border-subtle)" : undefined }}
                                 onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
                                 onMouseEnter={() => setSuggestionActiveIndex(i)}
                               >
                                 <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
                                 <span style={{ flex: 1 }}>{label}</span>
-                                {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                                {dist && <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
                               </div>
                             );
                           })}
@@ -3384,7 +2316,7 @@ export default function App() {
                     </div>
                     <div style={{ position: "relative" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 46px 20px 16px" }}>
-                        <span style={{ width: 11, height: 11, borderRadius: 3, background: "#7C838C", flexShrink: 0 }} />
+                        <span style={{ width: 11, height: 11, borderRadius: 3, background: "var(--text-faint)", flexShrink: 0 }} />
                         <input
                           style={{ ...styles.routeRowInput, fontSize: 17.5, fontWeight: 700 }}
                           placeholder="Adresse d'arrivée"
@@ -3403,13 +2335,13 @@ export default function App() {
                       </div>
                       {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
                         <div style={styles.suggestionBox}>
-                          <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default" }}>Recherche…</div>
+                          <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default" }}>Recherche…</div>
                         </div>
                       )}
                       {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
                         <div style={styles.suggestionBox}>
                           {form.arrivee.trim().length < 3 && (
-                            <div style={{ ...styles.suggestionItem, color: "#6E757E", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #23272E" }}>
+                            <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid var(--border-subtle)" }}>
                               Adresses récentes
                             </div>
                           )}
@@ -3421,13 +2353,13 @@ export default function App() {
                             return (
                               <div
                                 key={isRecent ? `recent-${s.address}` : s.place_id}
-                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "#23272E" : undefined }}
+                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "var(--border-subtle)" : undefined }}
                                 onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
                                 onMouseEnter={() => setSuggestionActiveIndex(i)}
                               >
                                 <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
                                 <span style={{ flex: 1 }}>{label}</span>
-                                {dist && <span style={{ fontSize: 12, color: "#8b909c", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+                                {dist && <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
                               </div>
                             );
                           })}
@@ -3454,8 +2386,8 @@ export default function App() {
                         onClick={() => setForm({ ...form, trajet: t.id })}
                         style={{
                           ...styles.typeChip, flex: 1,
-                          color: form.trajet === t.id ? "#1A1206" : "#B8BEC6",
-                          background: form.trajet === t.id ? "#FFB43A" : "#22262C",
+                          color: form.trajet === t.id ? "#1A1206" : "var(--text-tertiary)",
+                          background: form.trajet === t.id ? "#FFB43A" : "var(--surface-tile)",
                         }}
                       >
                         {t.label}
@@ -3481,7 +2413,7 @@ export default function App() {
                         Maintenant (patient prêt)
                       </button>
                       {pickupMode === "now" && (
-                        <p style={{ fontSize: 13, color: "#8A9099", margin: "8px 2px 0" }}>
+                        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "8px 2px 0" }}>
                           Prise en charge immédiate — {form.heure}.
                         </p>
                       )}
@@ -3527,9 +2459,9 @@ export default function App() {
                       via "Modifier" si besoin. Pas en mode modification. */}
                   {!editingId && form.heure && (
                     <div style={styles.expressBox}>
-                      <div style={{ fontSize: 14, color: "#B8BEC6", marginBottom: 10 }}>
+                      <div style={{ fontSize: 14, color: "var(--text-tertiary)", marginBottom: 10 }}>
                         Pressé ? Publie tout de suite — patient, notes et documents sont facultatifs.
-                        {form.tarif && !calculatingTarif && <> Tarif calculé : <strong style={{ color: "#F2F4F7" }}>{form.tarif} €</strong>.</>}
+                        {form.tarif && !calculatingTarif && <> Tarif calculé : <strong style={{ color: "var(--text-primary)" }}>{form.tarif} €</strong>.</>}
                       </div>
                       <button
                         type="button"
@@ -3572,8 +2504,8 @@ export default function App() {
                       onClick={() => setForm({ ...form, urgent: !form.urgent })}
                       style={{
                         ...styles.togglePill,
-                        borderColor: form.urgent ? "#E5484D" : "#3A4048",
-                        color: form.urgent ? "#fff" : "#B8BEC6",
+                        borderColor: form.urgent ? "#E5484D" : "var(--border-outline)",
+                        color: form.urgent ? "#fff" : "var(--text-tertiary)",
                         background: form.urgent ? "#E5484D" : "transparent",
                       }}
                     >
@@ -3584,8 +2516,8 @@ export default function App() {
                       onClick={() => setForm({ ...form, tpmr: !form.tpmr })}
                       style={{
                         ...styles.togglePill,
-                        borderColor: form.tpmr ? "#8FB3F5" : "#3A4048",
-                        color: form.tpmr ? "#fff" : "#B8BEC6",
+                        borderColor: form.tpmr ? "#8FB3F5" : "var(--border-outline)",
+                        color: form.tpmr ? "#fff" : "var(--text-tertiary)",
                         background: form.tpmr ? "#8FB3F5" : "transparent",
                       }}
                     >
@@ -3637,7 +2569,7 @@ export default function App() {
                     </button>
                   </label>
                   {form.document && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#8A9099", marginTop: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-muted)", marginTop: 8 }}>
                       <FileText size={14} /> {form.documentName || "bon-de-transport.pdf"}
                       <button
                         type="button"
@@ -3663,20 +2595,20 @@ export default function App() {
                         {(() => { const Icon = typeMeta(form.type).icon; return <Icon size={12} style={{ marginRight: 4 }} />; })()}
                         {typeMeta(form.type).label}
                       </span>
-                      <span style={{ fontSize: 12, color: "#8A9099" }}>{trajetLabel(form.trajet)}</span>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{trajetLabel(form.trajet)}</span>
                     </div>
                     <div style={{ display: "flex", gap: 14, marginBottom: 14 }}>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 10, flexShrink: 0, padding: "5px 0" }}>
                         <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                        <span style={{ flex: 1, width: 2, minHeight: 20, background: "#3A4048", margin: "4px 0", borderRadius: 1 }} />
-                        <span style={{ width: 10, height: 10, borderRadius: 3, background: "#7C838C", flexShrink: 0 }} />
+                        <span style={{ flex: 1, width: 2, minHeight: 20, background: "var(--border-outline)", margin: "4px 0", borderRadius: 1 }} />
+                        <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--text-faint)", flexShrink: 0 }} />
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 18, flex: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: 700, fontSize: 16.5, color: "#F2F4F7" }}>{form.depart || "—"}</span>
-                        <span style={{ fontWeight: 600, fontSize: 16.5, color: "#B8BEC6" }}>{form.arrivee || "—"}</span>
+                        <span style={{ fontWeight: 700, fontSize: 16.5, color: "var(--text-primary)" }}>{form.depart || "—"}</span>
+                        <span style={{ fontWeight: 600, fontSize: 16.5, color: "var(--text-tertiary)" }}>{form.arrivee || "—"}</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, color: "#8A9099", marginBottom: 14 }}>
+                    <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 14 }}>
                       {formatRideDate(form.date)} à {form.heure || "—"}
                       {form.trajet === "allerRetour" && form.heureRetour && ` · retour ${form.heureRetour}`}
                     </div>
@@ -3698,13 +2630,13 @@ export default function App() {
                             onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
                           Retour à vide (hospitalisation/dialyse)
                         </label>
-                        <div style={{ padding: "18px 16px", borderRadius: 14, background: "#22262C", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 12 }}>
-                          <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" }}>
+                        <div style={{ padding: "18px 16px", borderRadius: 14, background: "var(--surface-tile)", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 12 }}>
+                          <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
                             {calculatingTarif ? "…" : form.tarif ? `${form.tarif} €` : "—"}
                           </span>
                         </div>
                         <div style={{ textAlign: "center", marginTop: 8 }}>
-                          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "#FFB43A" : "#8A9099" }}>
+                          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "var(--accent-text)" : "var(--text-muted)" }}>
                             {calculatingTarif ? "calcul en cours…" : "grille CPAM · calculé automatiquement"}
                           </span>
                         </div>
@@ -3770,12 +2702,12 @@ export default function App() {
 
       {filter === "carte" ? (
         <main style={{ padding: "0 24px" }}>
-          <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 6 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 6 }}>
             {mapDrivers.length === 0
               ? "Aucun chauffeur ne partage sa position pour l'instant."
               : `${mapDrivers.length} chauffeur${mapDrivers.length > 1 ? "s" : ""} visible${mapDrivers.length > 1 ? "s" : ""} (position partagée il y a moins de 15 min)${radiusFilter !== "all" && myPosForMap ? `, dans un rayon de ${radiusFilter} km` : ""}.`}
           </p>
-          <p style={{ color: "#6E757E", fontSize: 12, marginBottom: 12, display: "flex", gap: 14, alignItems: "center" }}>
+          <p style={{ color: "var(--text-faint)", fontSize: 12, marginBottom: 12, display: "flex", gap: 14, alignItems: "center" }}>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3BD07A", display: "inline-block" }} /> Libre</span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#E5484D", display: "inline-block" }} /> En course</span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#FFB43A", display: "inline-block" }} /> Toi</span>
@@ -3786,7 +2718,7 @@ export default function App() {
       <main style={styles.board}>
         {visibleRides.length === 0 ? (
           <div style={styles.emptyState}>
-            <div style={{ ...styles.emptyIcon, position: "relative", background: filter === "dispo" ? "rgba(59,208,122,0.08)" : "#23272E" }}>
+            <div style={{ ...styles.emptyIcon, position: "relative", background: filter === "dispo" ? "rgba(59,208,122,0.08)" : "var(--border-subtle)" }}>
               {filter === "dispo" && (
                 <>
                   <span className="rp-radar-ring" />
@@ -3794,7 +2726,7 @@ export default function App() {
                   <span className="rp-radar-ring" />
                 </>
               )}
-              <Car size={32} color={filter === "dispo" ? "#3BD07A" : "#3A4048"} style={{ position: "relative" }} />
+              <Car size={32} color={filter === "dispo" ? "#3BD07A" : "var(--border-outline)"} style={{ position: "relative" }} />
             </div>
             <p style={styles.emptyTitle}>
               {filter === "dispo" ? "Aucune course disponible pour l'instant" : "Rien à afficher ici"}
@@ -3873,12 +2805,12 @@ export default function App() {
                   <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 8, flexShrink: 0, padding: "4px 0" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                      <span style={{ flex: 1, width: 2, minHeight: 16, background: "#3A4048", margin: "3px 0", borderRadius: 1 }} />
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                      <span style={{ flex: 1, width: 2, minHeight: 16, background: "var(--border-outline)", margin: "3px 0", borderRadius: 1 }} />
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--text-faint)", flexShrink: 0 }} />
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 14, minWidth: 0, flex: 1 }}>
-                      <span style={{ fontWeight: 700, fontSize: 15, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.depart)}</span>
-                      <span style={{ fontWeight: 600, fontSize: 15, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.depart)}</span>
+                      <span style={{ fontWeight: 600, fontSize: 15, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
                     </div>
                   </div>
                   {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
@@ -3897,13 +2829,13 @@ export default function App() {
                     <a
                       href={`tel:${r.patientTel.replace(/\s/g, "")}`}
                       onClick={(e) => e.stopPropagation()}
-                      style={{ ...styles.metaItem, color: "#FFB43A", textDecoration: "underline" }}
+                      style={{ ...styles.metaItem, color: "var(--accent-text)", textDecoration: "underline" }}
                     >
                       <Phone size={12} /> {r.patientTel}
                     </a>
                   )}
                   {r._dist != null && (
-                    <span style={{ ...styles.metaItem, color: "#FFB43A", fontWeight: 600 }}>
+                    <span style={{ ...styles.metaItem, color: "var(--accent-text)", fontWeight: 600 }}>
                       <Navigation size={12} /> À {r._dist.toFixed(1)} km de vous · ~{Math.round((r._dist / AVG_SPEED_KMH) * 60)} min
                     </span>
                   )}
@@ -4048,22 +2980,22 @@ export default function App() {
                 </div>
               )}
 
-              <div style={{ background: "#191C21", border: "1px solid #23272E", borderRadius: 14, marginBottom: 18, padding: "14px 14px", display: "flex", gap: 12 }}>
+              <div style={{ background: "var(--surface-card)", border: "1px solid var(--border-subtle)", borderRadius: 14, marginBottom: 18, padding: "14px 14px", display: "flex", gap: 12 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 9, flexShrink: 0, padding: "5px 0" }}>
                   <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#FFB43A", flexShrink: 0 }} />
-                  <span style={{ flex: 1, width: 2, minHeight: 26, background: "#3A4048", margin: "4px 0", borderRadius: 1 }} />
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "#7C838C", flexShrink: 0 }} />
+                  <span style={{ flex: 1, width: 2, minHeight: 26, background: "var(--border-outline)", margin: "4px 0", borderRadius: 1 }} />
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--text-faint)", flexShrink: 0 }} />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 20, flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15.5, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.depart}</span>
+                    <span style={{ fontWeight: 700, fontSize: 15.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.depart}</span>
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                       <a href={wazeUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#05C8F7" }} aria-label="Waze vers le départ" title="Waze">W</a>
                       <a href={googleMapsUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#4285F4" }} aria-label="Maps vers le départ" title="Maps">M</a>
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <span style={{ fontWeight: 600, fontSize: 15.5, color: "#B8BEC6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.arrivee}</span>
+                    <span style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.arrivee}</span>
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                       <a href={wazeUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#05C8F7" }} aria-label="Waze vers l'arrivée" title="Waze">W</a>
                       <a href={googleMapsUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#4285F4" }} aria-label="Maps vers l'arrivée" title="Maps">M</a>
@@ -4090,7 +3022,7 @@ export default function App() {
                 )}
                 {r.calcDistanceKm != null && (
                   <div style={styles.modalRow}>
-                    <span style={{ color: "#8A9099", fontSize: 13 }}>
+                    <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
                       Distance {r.calcIsRoadDistance ? "routière réelle" : "estimée (à vol d'oiseau)"} : {r.calcDistanceKm} km
                     </span>
                   </div>
@@ -4135,7 +3067,7 @@ export default function App() {
                   </span>
                 </div>
                 <div style={styles.modalRow}>
-                  <span style={{ color: "#6E757E", fontSize: 13 }}>Posté par {r.postedBy} · publiée le {formatPostedAt(r.createdAt)}</span>
+                  <span style={{ color: "var(--text-faint)", fontSize: 13 }}>Posté par {r.postedBy} · publiée le {formatPostedAt(r.createdAt)}</span>
                 </div>
                 {!mine && profiles[r.postedBy]?.phone && (
                   <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
@@ -4186,7 +3118,7 @@ export default function App() {
                 </button>
               )}
               {r.document && !mine && !takenByMe && !pendingByMe && (
-                <p style={{ color: "#6E757E", fontSize: 12, marginTop: 10, display: "flex", alignItems: "center", gap: 5 }}>
+                <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 10, display: "flex", alignItems: "center", gap: 5 }}>
                   <FileText size={12} /> Un bon de transport est joint — accessible une fois la course prise.
                 </p>
               )}
@@ -4221,7 +3153,7 @@ export default function App() {
                 </div>
               )}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border-outline)" }}>
                 {r.status === "disponible" && !mine && !isPriorityLocked && (
                   awaitingServerPriority(r) ? renderAwaitingClaimBtn(styles.btnPrimaryAction) : (
                     <button onClick={() => claim(r)} style={styles.btnPrimaryAction}>
@@ -4294,7 +3226,7 @@ export default function App() {
       <nav className="rp-bottom-nav" style={styles.bottomNav}>
         <button
           onClick={() => setFilter("dispo")}
-          style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "#FFB43A" : "#8A9099", position: "relative" }}
+          style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "var(--accent-text)" : "var(--text-muted)", position: "relative" }}
         >
           <Home size={22} />
           {newRidesBadge > 0 && (
@@ -4304,21 +3236,21 @@ export default function App() {
         </button>
         <button
           onClick={() => setShowMyCoursesPanel(true)}
-          style={{ ...styles.bottomNavBtn, color: "#8A9099" }}
+          style={{ ...styles.bottomNavBtn, color: "var(--text-muted)" }}
         >
           <Car size={22} />
           <span style={styles.bottomNavLabel}>Courses</span>
         </button>
         {/* Emplacement réservé au bouton + flottant, pour qu'il ne recouvre aucun onglet. */}
         <div style={styles.bottomNavFabSlot} aria-hidden="true" />
-        <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, color: "#8A9099", position: "relative" }}>
+        <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, color: "var(--text-muted)", position: "relative" }}>
           <MessageCircle size={22} />
           {totalUnreadMessages > 0 && (
             <span style={styles.navBadge}>{totalUnreadMessages > 9 ? "9+" : totalUnreadMessages}</span>
           )}
           <span style={styles.bottomNavLabel}>Messages</span>
         </button>
-        <button onClick={() => setShowAccountPanel(true)} style={{ ...styles.bottomNavBtn, color: "#8A9099" }}>
+        <button onClick={() => setShowAccountPanel(true)} style={{ ...styles.bottomNavBtn, color: "var(--text-muted)" }}>
           <User size={22} />
           <span style={styles.bottomNavLabel}>Compte</span>
         </button>
@@ -4372,7 +3304,7 @@ export default function App() {
 
             {!accountSubPanel && (
               <>
-                <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>{user?.email}</p>
+                <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>{user?.email}</p>
                 <div style={styles.gainsCard}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     <span style={styles.gainsLabel}>Gains {earningsLabel}</span>
@@ -4386,28 +3318,28 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
                   <button onClick={() => setAccountSubPanel("profile")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><User size={16} /> Modifier mon profil</span>
-                    <span style={{ color: "#6E757E" }}>›</span>
+                    <span style={{ color: "var(--text-faint)" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("settings")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><Settings size={16} /> Réglages (service, notifications)</span>
-                    <span style={{ color: "#6E757E" }}>›</span>
+                    <span style={{ color: "var(--text-faint)" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("company")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><Building2 size={16} /> Ma société</span>
-                    <span style={{ color: "#6E757E" }}>›</span>
+                    <span style={{ color: "var(--text-faint)" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("dashboard")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><LayoutDashboard size={16} /> Tableau de bord</span>
-                    <span style={{ color: "#6E757E" }}>›</span>
+                    <span style={{ color: "var(--text-faint)" }}>›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("support")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><LifeBuoy size={16} /> Aide & réclamations</span>
-                    <span style={{ color: "#6E757E" }}>›</span>
+                    <span style={{ color: "var(--text-faint)" }}>›</span>
                   </button>
                   {isAdmin && (
                     <button
                       onClick={() => { setShowAdminPanel(true); setShowAccountPanel(false); }}
-                      style={{ ...styles.categoryBtn, borderColor: "#FFB43A", color: "#FFB43A" }}
+                      style={{ ...styles.categoryBtn, borderColor: "#FFB43A", color: "var(--accent-text)" }}
                     >
                       <span style={styles.categoryBtnLeft}><Shield size={16} /> Administration</span>
                       <span>›</span>
@@ -4428,14 +3360,14 @@ export default function App() {
                 <label style={styles.fieldLabel}>
                   Pseudo
                   <input style={{ ...styles.input, opacity: 0.6 }} value={driverName} disabled />
-                  <span style={{ color: "#6E757E", fontSize: 12, fontWeight: 400 }}>
+                  <span style={{ color: "var(--text-faint)", fontSize: 12, fontWeight: 400 }}>
                     Fixe — il sert d'identifiant technique pour tes courses et messages. Contacte l'administrateur si tu as vraiment besoin d'en changer.
                   </span>
                 </label>
 
                 <label style={styles.fieldLabel}>
                   Adresse email de connexion
-                  <span style={{ color: "#8A9099", fontSize: 13, fontWeight: 400 }}>Actuelle : {user?.email}</span>
+                  <span style={{ color: "var(--text-muted)", fontSize: 13, fontWeight: 400 }}>Actuelle : {user?.email}</span>
                   <div style={{ display: "flex", gap: 6 }}>
                     <input
                       type="email"
@@ -4449,7 +3381,7 @@ export default function App() {
                     </button>
                   </div>
                   {emailChangeStatus && (
-                    <span style={{ fontSize: 12.5, color: emailChangeStatus.ok ? "#3BD07A" : "#E5484D" }}>
+                    <span style={{ fontSize: 12.5, color: emailChangeStatus.ok ? "var(--positive-text)" : "#E5484D" }}>
                       {emailChangeStatus.text}
                     </span>
                   )}
@@ -4523,7 +3455,7 @@ export default function App() {
                     </button>
                   </div>
                   {licenseChangeStatus && (
-                    <span style={{ fontSize: 12.5, color: licenseChangeStatus.ok ? "#3BD07A" : "#E5484D" }}>
+                    <span style={{ fontSize: 12.5, color: licenseChangeStatus.ok ? "var(--positive-text)" : "#E5484D" }}>
                       {licenseChangeStatus.text}
                     </span>
                   )}
@@ -4548,14 +3480,38 @@ export default function App() {
 
             {accountSubPanel === "settings" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={styles.myCoursesSectionTitle}>Affichage</div>
+                <div style={{ display: "flex", gap: 4, background: "var(--surface-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: 4, marginBottom: 14 }}>
+                  {[
+                    { id: "auto", label: "Automatique" },
+                    { id: "light", label: "Clair" },
+                    { id: "dark", label: "Sombre" },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setTheme(t.id)}
+                      style={{
+                        flex: 1, border: "none", borderRadius: 9, minHeight: 44, fontSize: 14.5, fontWeight: 700, cursor: "pointer",
+                        background: theme === t.id ? "#FFB43A" : "transparent",
+                        color: theme === t.id ? "#1A1206" : "var(--text-tertiary)",
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "-8px 2px 14px" }}>
+                  « Automatique » suit le réglage clair/sombre du téléphone.
+                </p>
+                <div style={styles.myCoursesSectionTitle}>Service et notifications</div>
                 <button
                   onClick={() => {
                     sharePosition();
                   }}
                   style={{
                     ...styles.btnGhost,
-                    borderColor: myPosStatus === "ok" ? "#3BD07A" : "#3A4048",
-                    color: myPosStatus === "ok" ? "#3BD07A" : "#F2F4F7",
+                    borderColor: myPosStatus === "ok" ? "#3BD07A" : "var(--border-outline)",
+                    color: myPosStatus === "ok" ? "var(--positive-text)" : "var(--text-primary)",
                     textAlign: "left",
                   }}
                 >
@@ -4568,8 +3524,8 @@ export default function App() {
                     disabled={notifPermission === "granted"}
                     style={{
                       ...styles.btnGhost,
-                      borderColor: notifPermission === "granted" ? "#3BD07A" : "#3A4048",
-                      color: notifPermission === "granted" ? "#3BD07A" : "#F2F4F7",
+                      borderColor: notifPermission === "granted" ? "#3BD07A" : "var(--border-outline)",
+                      color: notifPermission === "granted" ? "var(--positive-text)" : "var(--text-primary)",
                       textAlign: "left",
                     }}
                   >
@@ -4632,7 +3588,7 @@ export default function App() {
 
             {accountSubPanel === "dashboard" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <p style={{ color: "#8A9099", fontSize: 13 }}>
+                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
                   Résumé {earningsLabel} — change le filtre de date depuis l'accueil pour changer la période.
                 </p>
                 <div style={styles.gainsCard}>
@@ -4663,7 +3619,7 @@ export default function App() {
               const mailBody = encodeURIComponent(`Chauffeur : ${driverName}\n\nDécris ton problème ici :\n`);
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  <p style={{ color: "#8A9099", fontSize: 13 }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
                     Un souci avec une course, un chauffeur, ou l'application ? Précise ton pseudo et,
                     si besoin, la course concernée — ça aide à traiter la demande plus vite.
                   </p>
@@ -4672,7 +3628,7 @@ export default function App() {
                     style={{ ...styles.categoryBtn, textDecoration: "none" }}
                   >
                     <span style={styles.categoryBtnLeft}><Mail size={16} /> Envoyer un email</span>
-                    <span style={{ color: "#6E757E" }}>›</span>
+                    <span style={{ color: "var(--text-faint)" }}>›</span>
                   </a>
                   {adminPhone ? (
                     <a
@@ -4680,10 +3636,10 @@ export default function App() {
                       style={{ ...styles.categoryBtn, textDecoration: "none" }}
                     >
                       <span style={styles.categoryBtnLeft}><MessageCircle size={16} /> Envoyer un SMS</span>
-                      <span style={{ color: "#6E757E" }}>›</span>
+                      <span style={{ color: "var(--text-faint)" }}>›</span>
                     </a>
                   ) : (
-                    <p style={{ color: "#6E757E", fontSize: 12 }}>
+                    <p style={{ color: "var(--text-faint)", fontSize: 12 }}>
                       Numéro de l'administrateur non renseigné pour l'instant — passe par email.
                     </p>
                   )}
@@ -4707,7 +3663,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 16 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
               {allKnownDriverNames.length} chauffeur{allKnownDriverNames.length > 1 ? "s" : ""} connu{allKnownDriverNames.length > 1 ? "s" : ""}.
               Bannir un chauffeur le déconnecte immédiatement et l'empêche de se reconnecter.
             </p>
@@ -4728,7 +3684,7 @@ export default function App() {
                 {emailRepairStatus === "loading" ? "Réparation en cours…" : "Réparer les emails manquants"}
               </button>
               {emailRepairStatus && emailRepairStatus !== "loading" && (
-                <p style={{ color: emailRepairStatus.error ? "#E5484D" : "#8A9099", fontSize: 12, marginTop: 6 }}>
+                <p style={{ color: emailRepairStatus.error ? "#E5484D" : "var(--text-muted)", fontSize: 12, marginTop: 6 }}>
                   {emailRepairStatus.error
                     ? `Erreur : ${emailRepairStatus.error}`
                     : `${emailRepairStatus.updated} profil(s) complété(s) sur ${emailRepairStatus.checked} vérifié(s). ${emailRepairStatus.authUserCount} compte(s) Firebase Auth trouvé(s).${emailRepairStatus.authError ? ` Erreur Auth : ${emailRepairStatus.authError}` : ""}`}
@@ -4736,7 +3692,7 @@ export default function App() {
               )}
               {emailRepairStatus?.missing?.length > 0 && (
                 <div style={{ marginTop: 4 }}>
-                  <p style={{ color: "#8A9099", fontSize: 12, margin: "0 0 6px" }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: 12, margin: "0 0 6px" }}>
                     Toujours sans email — choisis le bon compte ci-dessous si tu le reconnais :
                   </p>
                   {emailRepairStatus.missing.map((name) => {
@@ -4745,7 +3701,7 @@ export default function App() {
                       <div key={name} style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 700 }}>{name}</div>
                         {candidates.length === 0 ? (
-                          <div style={{ fontSize: 11.5, color: "#6E757E" }}>Aucun compte Auth ressemblant trouvé.</div>
+                          <div style={{ fontSize: 11.5, color: "var(--text-faint)" }}>Aucun compte Auth ressemblant trouvé.</div>
                         ) : (
                           candidates.map((c) => (
                             <button
@@ -4780,19 +3736,19 @@ export default function App() {
                     key={name}
                     style={{
                       display: "flex", alignItems: "center", justifyContent: "space-between",
-                      background: "#191C21", border: "1px solid #2A2F36", borderRadius: 8, padding: "10px 12px",
+                      background: "var(--surface-card)", border: "1px solid var(--border-strong)", borderRadius: 8, padding: "10px 12px",
                       opacity: p.deleted ? 0.5 : 1,
                     }}
                   >
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {name} {name === driverName && "(toi)"}{" "}
-                        <span style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "#3BD07A" : "#6E757E", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: isOnline ? "#3BD07A" : "#6E757E", display: "inline-block" }} />
+                        <span style={{ fontSize: 11, fontWeight: 600, color: isOnline ? "var(--positive-text)" : "var(--text-faint)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: isOnline ? "#3BD07A" : "var(--text-faint)", display: "inline-block" }} />
                           {isOnline ? "en ligne" : "hors ligne"}
                         </span>
                       </div>
-                      <div style={{ fontSize: 12, color: "#6E757E" }}>
+                      <div style={{ fontSize: 12, color: "var(--text-faint)" }}>
                         {p.email || "email inconnu"} {p.phone && `· ${p.phone}`}
                         {p.licenseNumber && ` · Licence ${p.licenseNumber}`}
                         {p.commune && ` · ${p.commune}`}
@@ -4810,7 +3766,7 @@ export default function App() {
                         {p.deleted ? (
                           <button
                             onClick={() => restoreDriverAccount(name)}
-                            style={{ ...styles.btnGhost, borderColor: "#3BD07A", color: "#3BD07A", fontSize: 12, padding: "6px 10px" }}
+                            style={{ ...styles.btnGhost, borderColor: "#3BD07A", color: "var(--positive-text)", fontSize: 12, padding: "6px 10px" }}
                           >
                             Restaurer
                           </button>
@@ -4828,7 +3784,7 @@ export default function App() {
                               style={{
                                 ...styles.btnGhost,
                                 borderColor: p.banned ? "#3BD07A" : "#E5484D",
-                                color: p.banned ? "#3BD07A" : "#E5484D",
+                                color: p.banned ? "var(--positive-text)" : "#E5484D",
                                 fontSize: 12, padding: "6px 10px",
                               }}
                             >
@@ -4861,7 +3817,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 12 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
               Son téléphone et sa commune seront effacés, sa position retirée de la carte, et il ne pourra
               plus jamais se reconnecter tant que tu n'auras pas cliqué "Restaurer". Ses courses passées
               restent visibles dans l'historique.
@@ -4893,7 +3849,7 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "#8A9099", fontSize: 13, marginBottom: 12 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
               Ce chauffeur sera déconnecté immédiatement et ne pourra plus se reconnecter tant que tu ne le réactives pas.
             </p>
             <label style={styles.fieldLabel}>
@@ -4944,9 +3900,9 @@ export default function App() {
                   style={{
                     flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
                     borderRadius: 10, padding: "11px 0", fontSize: 14, fontWeight: 700, cursor: "pointer",
-                    border: myCoursesView === t.id ? "1.5px solid #FFB43A" : "1.5px solid #23272E",
+                    border: myCoursesView === t.id ? "1.5px solid #FFB43A" : "1.5px solid var(--border-subtle)",
                     background: myCoursesView === t.id ? "rgba(255,180,58,0.12)" : "transparent",
-                    color: myCoursesView === t.id ? "#FFB43A" : "#B8BEC6",
+                    color: myCoursesView === t.id ? "var(--accent-text)" : "var(--text-tertiary)",
                   }}
                 >
                   <t.icon size={16} /> {t.label}
@@ -4959,7 +3915,7 @@ export default function App() {
               <Car size={13} /> Courses prises ({myTakenRides.length})
             </div>
             {myTakenRides.length === 0 ? (
-              <p style={{ color: "#6E757E", fontSize: 13, marginBottom: 26 }}>
+              <p style={{ color: "var(--text-faint)", fontSize: 13, marginBottom: 26 }}>
                 Aucune course prise pour l'instant — les courses que tu prends à d'autres chauffeurs apparaîtront ici.
               </p>
             ) : (
@@ -4972,7 +3928,7 @@ export default function App() {
               <Send size={13} /> Courses données ({myPostedRides.length})
             </div>
             {myPostedRides.length === 0 ? (
-              <p style={{ color: "#6E757E", fontSize: 13 }}>
+              <p style={{ color: "var(--text-faint)", fontSize: 13 }}>
                 Aucune course donnée pour l'instant — les courses que tu postes toi-même apparaîtront ici.
               </p>
             ) : (
@@ -4996,7 +3952,7 @@ export default function App() {
           </div>
           <div style={styles.wizardBody}>
             {conversations.length === 0 ? (
-              <p style={{ color: "#8A9099", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
+              <p style={{ color: "var(--text-muted)", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
                 Aucune conversation pour l'instant. Elles apparaissent ici dès qu'une course que tu as postée ou prise a un message.
               </p>
             ) : (
@@ -5007,17 +3963,17 @@ export default function App() {
                     onClick={() => { setChatRideId(c.rideId); setShowMessagesPanel(false); }}
                     style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
-                      background: "#0F1114", border: "1px solid #23272E", borderRadius: 10,
+                      background: "var(--bg-screen)", border: "1px solid var(--border-subtle)", borderRadius: 10,
                       padding: "12px 14px", textAlign: "left", cursor: "pointer",
                     }}
                   >
                     <div style={{ overflow: "hidden" }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
                         {c.otherParty || "?"}
-                        {c.ride && <span style={{ color: "#8A9099", fontWeight: 400 }}> — {c.ride.depart} → {c.ride.arrivee}</span>}
+                        {c.ride && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> — {c.ride.depart} → {c.ride.arrivee}</span>}
                       </div>
                       <div style={{
-                        color: "#8A9099", fontSize: 13, whiteSpace: "nowrap",
+                        color: "var(--text-muted)", fontSize: 13, whiteSpace: "nowrap",
                         overflow: "hidden", textOverflow: "ellipsis", maxWidth: 260,
                       }}>
                         {c.last.senderName === driverName ? "Toi : " : ""}{c.last.text}
@@ -5045,7 +4001,7 @@ export default function App() {
           </div>
           <div style={{ ...styles.wizardBody, display: "flex", flexDirection: "column", gap: 12 }}>
               {chatMessages.length === 0 && (
-                <p style={{ color: "#6E757E", fontSize: 13, textAlign: "center", marginTop: 20 }}>
+                <p style={{ color: "var(--text-faint)", fontSize: 13, textAlign: "center", marginTop: 20 }}>
                   Aucun message pour l'instant.
                 </p>
               )}
@@ -5057,8 +4013,8 @@ export default function App() {
                     style={{
                       alignSelf: isMe ? "flex-end" : "flex-start",
                       maxWidth: "76%",
-                      background: isMe ? "#FFB43A" : "#22262C",
-                      color: isMe ? "#1A1206" : "#E4E7EB",
+                      background: isMe ? "#FFB43A" : "var(--surface-tile)",
+                      color: isMe ? "#1A1206" : "var(--text-secondary)",
                       padding: "13px 15px",
                       borderRadius: isMe ? "16px 16px 5px 16px" : "16px 16px 16px 5px",
                       fontSize: 14,
@@ -5073,13 +4029,13 @@ export default function App() {
               })}
               <div ref={chatEndRef} />
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid #3A4048" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-outline)" }}>
               <input
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSendMessage(); }}
                 placeholder="Écrire un message…"
-                style={{ ...styles.input, flex: 1, minWidth: 0, background: "#22262C", border: "none", borderRadius: 999 }}
+                style={{ ...styles.input, flex: 1, minWidth: 0, background: "var(--surface-tile)", border: "none", borderRadius: 999 }}
               />
               <button
                 onClick={handleSendMessage}
@@ -5098,373 +4054,3 @@ export default function App() {
     </div>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0F1114",
-    color: "#F2F4F7",
-    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: "0 0 40px 0",
-    position: "relative",
-  },
-  pageAuth: {
-    minHeight: "100vh",
-    background: "#0F1114",
-    color: "#F2F4F7",
-    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: "0 0 40px 0",
-    position: "relative",
-    overflow: "hidden",
-  },
-  gateCard: { position: "relative", zIndex: 1, maxWidth: 380, margin: "80px auto", background: "rgba(25,28,33,0.88)", backdropFilter: "blur(6px)", borderRadius: 14, padding: "32px 28px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid #23272E" },
-  logoBadgeLarge: {
-    position: "relative", width: 64, height: 64, borderRadius: 18,
-    background: "#FFB43A",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    margin: "0 auto 16px",
-  },
-  logoBeaconLarge: {
-    position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%",
-    background: "#3BD07A", border: "3px solid #0F1114",
-  },
-  logoBadge: {
-    position: "relative", width: 38, height: 38, borderRadius: 12,
-    background: "#FFB43A",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    flexShrink: 0,
-  },
-  gateTitle: { fontFamily: "'Manrope', sans-serif", fontSize: 30, letterSpacing: 0.5, fontWeight: 700, margin: 0 },
-  gateSub: { color: "#8A9099", fontSize: 14, marginTop: 10, lineHeight: 1.5 },
-  header: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: "1px solid #23272E", position: "sticky", top: 0, background: "#131519", zIndex: 10, flexWrap: "nowrap", gap: 10 },
-  title: { fontFamily: "'Manrope', sans-serif", fontSize: 18, letterSpacing: "-0.01em", fontWeight: 800, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  headerSubtitle: { fontSize: 12, fontWeight: 500, color: "#8A9099", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" },
-  statusPill: {
-    display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 999,
-    border: "1px solid", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Manrope', sans-serif",
-  },
-  statusPillOn: { background: "rgba(59,208,122,0.10)", borderColor: "rgba(59,208,122,0.28)", color: "#3BD07A" },
-  statusPillOff: { background: "#22262C", borderColor: "#2A2F36", color: "#8A9099" },
-  onlineDriversBadge: {
-    display: "flex", alignItems: "center", gap: 5, padding: "6px 10px", borderRadius: 999,
-    border: "1px solid rgba(255,180,58,0.28)", background: "rgba(255,180,58,0.10)", color: "#FFB43A",
-    fontSize: 12, fontWeight: 700, fontFamily: "'Manrope', sans-serif",
-  },
-  dateFilterRow: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  iconBtn: { background: "#23272E", border: "1px solid #3A4048", color: "#F2F4F7", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", alignItems: "center", fontSize: 12 },
-  iconCircleBtn: {
-    position: "relative", width: 38, height: 38, borderRadius: "50%",
-    background: "#191C21", border: "1px solid #3A4048", color: "#B8BEC6",
-    display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0,
-  },
-  iconCircleBtnActive: { borderColor: "#FFB43A", color: "#FFB43A", background: "rgba(255,180,58,0.10)" },
-  iconCircleDot: {
-    position: "absolute", top: 2, right: 2, width: 8, height: 8, borderRadius: "50%",
-    background: "#FFB43A", border: "2px solid #131519",
-  },
-  tabs: { display: "flex", gap: 8, padding: "16px 24px", alignItems: "center", flexWrap: "wrap" },
-  tab: { background: "transparent", border: "1px solid #3A4048", color: "#8A9099", padding: "8px 14px", borderRadius: 20, cursor: "pointer", fontSize: 13 },
-  tabActive: { background: "#FFB43A", color: "#1A1206", borderColor: "#FFB43A", fontWeight: 600 },
-  btnPrimary: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "12px 18px", borderRadius: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 15, minHeight: 48 },
-  btnGhost: { background: "transparent", border: "1px solid #3A4048", color: "#F2F4F7", padding: "11px 16px", borderRadius: 10, cursor: "pointer", fontSize: 14.5, fontWeight: 600, minHeight: 46 },
-  btnClaim: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "12px 20px", borderRadius: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, minHeight: 52 },
-  formCard: {
-    margin: "0 24px 20px", background: "#1F1A12", border: "1px solid rgba(255,180,58,0.35)",
-    borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14,
-  },
-  wizardOverlay: {
-    position: "fixed", inset: 0, background: "#0F1114", zIndex: 200,
-    display: "flex", flexDirection: "column",
-  },
-  wizardForm: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 },
-  wizardHeader: {
-    display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
-    borderBottom: "1px solid #23272E", flexShrink: 0,
-  },
-  wizardNavBtn: {
-    background: "#191C21", border: "1px solid #23272E", color: "#F2F4F7",
-    borderRadius: 10, width: 38, height: 38, display: "flex", alignItems: "center",
-    justifyContent: "center", cursor: "pointer", flexShrink: 0,
-  },
-  wizardStepLabel: {
-    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 800,
-    color: "#8A9099", textTransform: "uppercase", letterSpacing: "0.10em", marginBottom: 6,
-  },
-  wizardStepDots: { display: "flex", gap: 6 },
-  wizardStepDot: { height: 4, borderRadius: 2, flex: 1, background: "#23272E" },
-  wizardStepDotActive: { background: "#FFB43A" },
-  wizardBody: { flex: 1, minHeight: 0, overflowY: "auto", overscrollBehaviorY: "contain", padding: "20px 20px 28px" },
-  wizardTitle: { fontSize: 21, fontWeight: 800, margin: "0 0 4px", fontFamily: "'Manrope', sans-serif", letterSpacing: "-0.01em" },
-  wizardSubtitle: { fontSize: 13, color: "#8A9099", margin: "0 0 22px" },
-  wizardSectionTitle: {
-    fontFamily: "'Manrope', sans-serif", fontSize: 13, fontWeight: 700,
-    color: "#F2F4F7", margin: "0 0 12px",
-  },
-  wizardModeBtn: {
-    display: "flex", alignItems: "center", width: "100%", textAlign: "left",
-    background: "#191C21", border: "1.5px solid #23272E", color: "#B8BEC6",
-    padding: "14px 16px", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700,
-    minHeight: 52,
-  },
-  wizardModeBtnActive: { borderColor: "#FFB43A", background: "rgba(255,180,58,0.12)", color: "#F2F4F7" },
-  wizardSummaryCard: { background: "#191C21", border: "1px solid #23272E", borderRadius: 16, padding: 16 },
-  wizardFooter: {
-    display: "flex", gap: 10, padding: "14px 16px", borderTop: "1px solid #23272E",
-    background: "#0F1114", flexShrink: 0,
-  },
-  fullPageHeader: {
-    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-    padding: "16px 16px", borderBottom: "1px solid #23272E", flexShrink: 0,
-  },
-  fullPageTitle: { fontSize: 17.5, fontWeight: 800, margin: 0, fontFamily: "'Manrope', sans-serif", flex: 1, textAlign: "center" },
-  myCoursesSectionTitle: {
-    display: "flex", alignItems: "center", gap: 8, fontFamily: "'IBM Plex Mono', monospace",
-    fontSize: 11.5, fontWeight: 800, color: "#8A9099", textTransform: "uppercase", letterSpacing: "0.10em",
-    margin: "0 0 12px",
-  },
-  formRow: { display: "flex", gap: 8, flexWrap: "wrap" },
-  formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
-  typeChip: { border: "none", padding: "12px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 700, minHeight: 48 },
-  input: { background: "#191C21", border: "1.5px solid #23272E", color: "#F2F4F7", padding: "14px 14px", borderRadius: 10, fontSize: 16.5, outline: "none", minHeight: 50 },
-  checkboxRow: { display: "flex", alignItems: "center", gap: 10, fontSize: 14.5, color: "#B8BEC6" },
-  fieldLabel: { display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, color: "#E4E7EB", fontWeight: 700 },
-  formLabel: {
-    display: "flex", flexDirection: "column", gap: 7,
-    fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 800,
-    color: "#B8BEC6", textTransform: "uppercase", letterSpacing: "0.10em",
-  },
-  sectionLabel: {
-    fontFamily: "'Manrope', sans-serif", fontSize: 11.5, fontWeight: 700,
-    color: "#6E757E", textTransform: "uppercase", letterSpacing: 0.6,
-    marginTop: 18, marginBottom: 2,
-  },
-  sectionDivider: { height: 1, background: "#23272E", margin: "18px 0 0" },
-  categoryBtn: {
-    display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
-    background: "#0F1114", border: "1.5px solid #23272E", borderRadius: 12,
-    padding: "16px 16px", minHeight: 56, fontSize: 15.5, fontWeight: 700, color: "#F2F4F7",
-    cursor: "pointer", textAlign: "left",
-  },
-  categoryBtnLeft: { display: "flex", alignItems: "center", gap: 12 },
-  togglePill: {
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-    border: "1.5px solid #3A4048", background: "transparent", color: "#B8BEC6",
-    padding: "13px 16px", borderRadius: 12, cursor: "pointer", fontSize: 14.5, fontWeight: 600,
-    minHeight: 50, flex: 1,
-  },
-  collapsibleHeader: {
-    display: "flex", alignItems: "center", justifyContent: "space-between",
-    background: "transparent", border: "none", color: "#8A9099", cursor: "pointer",
-    fontSize: 14, fontWeight: 600, padding: "6px 2px", width: "100%",
-  },
-  swapBtn: {
-    position: "absolute", right: -6, top: "50%", transform: "translateY(-50%)", zIndex: 5,
-    background: "#FFB43A", color: "#1A1206", border: "3px solid #191C21", borderRadius: "50%",
-    width: 34, height: 34, cursor: "pointer", fontSize: 14, fontWeight: 700,
-    display: "flex", alignItems: "center", justifyContent: "center",
-  },
-  routeCard: { position: "relative", background: "#191C21", border: "1px solid #23272E", borderRadius: 14, marginTop: 7 },
-  routeRowInput: {
-    border: "none", background: "transparent", outline: "none", color: "#F2F4F7",
-    fontSize: 15, fontWeight: 600, fontFamily: "'Manrope', sans-serif", padding: 0, flex: 1, minWidth: 0,
-  },
-  tpmrBadge: {
-    fontSize: 12, fontWeight: 700, color: "#1A1206", background: "#8A9099",
-    padding: "2px 6px", borderRadius: 4, marginRight: 4,
-  },
-  suggestionBox: {
-    position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
-    background: "#191C21",
-    border: "1.5px solid #3A4048",
-    borderRadius: 10,
-    marginTop: 6,
-    maxHeight: 260,
-    overflowY: "auto",
-    zIndex: 50,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-  },
-  suggestionItem: {
-    display: "flex",
-    alignItems: "center",
-    padding: "14px 14px",
-    fontSize: 15,
-    color: "#F2F4F7",
-    cursor: "pointer",
-    borderBottom: "1px solid #23272E",
-    minHeight: 48,
-  },
-  photoPreview: { maxWidth: 160, maxHeight: 160, borderRadius: 8, display: "block", border: "1px solid #3A4048" },
-  photoRemoveBtn: {
-    position: "absolute", top: -8, right: -8, background: "#E5484D", color: "#fff",
-    border: "none", borderRadius: "50%", width: 24, height: 24, display: "flex",
-    alignItems: "center", justifyContent: "center", cursor: "pointer",
-  },
-  cardThumb: { width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8, marginBottom: 10, display: "block" },
-  modalPhoto: { width: "100%", borderRadius: 10, marginTop: 12, display: "block" },
-  board: { padding: "0 24px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 },
-  mapContainer: { width: "100%", height: "45vh", minHeight: 320, maxHeight: 460, borderRadius: 12, border: "1px solid #2A2F36", overflow: "hidden", position: "relative", zIndex: 1, touchAction: "none" },
-  empty: { color: "#6E757E", padding: "40px 0", textAlign: "center" },
-  emptyState: { padding: "50px 24px", textAlign: "center", maxWidth: 380, margin: "0 auto" },
-  emptyIcon: {
-    width: 72, height: 72, borderRadius: "50%", background: "#23272E",
-    display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px",
-    border: "1px solid #2A2F36",
-  },
-  emptyTitle: { color: "#F2F4F7", fontSize: 16, fontWeight: 600, margin: "0 0 8px" },
-  emptySub: { color: "#6E757E", fontSize: 13, lineHeight: 1.5, margin: 0 },
-  card: { background: "#191C21", borderRadius: 18, padding: "15px 16px", position: "relative", border: "1px solid #23272E" },
-  urgentBadge: { position: "absolute", top: -8, right: 12, background: "#E5484D", color: "#fff", fontSize: 13, fontWeight: 700, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center" },
-  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  typeTag: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 700, padding: "4px 8px", borderRadius: 6, display: "flex", alignItems: "center", letterSpacing: "0.10em", textTransform: "uppercase" },
-  statusTag: { fontSize: 13.5, fontWeight: 800, padding: "5px 10px", borderRadius: 999, whiteSpace: "nowrap" },
-  metaRow: { display: "flex", gap: 14, fontSize: 14, color: "#A3AAB3", marginBottom: 8, flexWrap: "wrap" },
-  metaItem: { display: "flex", alignItems: "center", gap: 4 },
-  tarifTag: {
-    display: "flex", alignItems: "center", fontSize: 20, fontWeight: 800,
-    fontFamily: "'Manrope', sans-serif", letterSpacing: "-0.02em",
-    fontVariantNumeric: "tabular-nums", color: "#F2F4F7",
-  },
-  contactBtn: {
-    flex: 1, textAlign: "center", background: "#23272E", border: "1px solid #3A4048",
-    color: "#F2F4F7", padding: "9px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
-    textDecoration: "none",
-  },
-  callBtn: {
-    display: "flex", alignItems: "center", gap: 12, flex: 1,
-    background: "rgba(59,208,122,0.10)", border: "1px solid rgba(59,208,122,0.28)",
-    borderRadius: 12, padding: "10px 14px", textDecoration: "none", minWidth: 0,
-  },
-  callBtnIcon: {
-    width: 36, height: 36, borderRadius: "50%", background: "#3BD07A",
-    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-  },
-  callBtnText: { display: "flex", flexDirection: "column", gap: 1, minWidth: 0 },
-  callBtnLabel: { fontSize: 14, fontWeight: 700, color: "#F2F4F7" },
-  callBtnSub: { fontSize: 12, color: "#8A9099", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  smsIconBtn: {
-    width: 46, height: 46, borderRadius: 12, border: "1px solid #3A4048", background: "transparent",
-    display: "flex", alignItems: "center", justifyContent: "center", color: "#B8BEC6", flexShrink: 0,
-  },
-  btnPrimaryAction: {
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
-    background: "#FFB43A", color: "#1A1206", border: "none", borderRadius: 12,
-    padding: "17px 18px", fontSize: 17, fontWeight: 800, cursor: "pointer", minHeight: 58,
-  },
-  btnSecondaryAction: {
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flex: 1,
-    background: "transparent", color: "#E4E7EB", border: "1.5px solid #3A4048", borderRadius: 12,
-    padding: "14px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer",
-  },
-  btnUtilityAction: {
-    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-    flex: "1 1 84px", minWidth: 0, whiteSpace: "nowrap",
-    background: "#191C21", color: "#B8BEC6", border: "1px solid #23272E", borderRadius: 10,
-    padding: "10px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-  },
-  notes: { fontSize: 14, color: "#C4CAD2", background: "#22262C", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
-  priorityBanner: { display: "flex", alignItems: "center", fontSize: 14, fontWeight: 600, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
-  pendingBanner: { fontSize: 14, fontWeight: 600, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
-  cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, borderTop: "1px solid #2A2F36", paddingTop: 12 },
-  postedBy: { fontSize: 13, color: "#8A9099" },
-  expressBox: {
-    marginTop: 26, padding: 16, borderRadius: 14,
-    background: "rgba(255,180,58,0.07)", border: "1px solid rgba(255,180,58,0.3)",
-  },
-  hintBanner: { margin: "0 24px 16px", background: "#23272E", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#8A9099" },
-  gainsCard: {
-    padding: 18, borderRadius: 20, background: "#191C21", border: "1px solid #23272E",
-    display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12,
-  },
-  gainsLabel: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", color: "#8A9099", textTransform: "uppercase" },
-  gainsAmount: { fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", color: "#F2F4F7" },
-  gainsCount: { fontSize: 13, fontWeight: 600, color: "#8A9099", textAlign: "right", lineHeight: 1.3 },
-  errorBanner: { margin: "0 24px 16px", background: "#E5484D", padding: "10px 14px", borderRadius: 8, display: "flex", justifyContent: "space-between", fontSize: 13 },
-  modalOverlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 100 },
-  modalCard: { background: "#23272E", borderRadius: 14, padding: 24, maxWidth: 440, width: "100%", maxHeight: "85vh", overflowY: "auto", overflowX: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" },
-  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  modalTitle: { fontSize: 18, margin: "0 0 16px", color: "#F2F4F7" },
-  modalGrid: { display: "flex", flexDirection: "column", gap: 10 },
-  navIconBtn: {
-    display: "flex", alignItems: "center", justifyContent: "center",
-    width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-    color: "#fff", fontSize: 13, fontWeight: 800, textDecoration: "none",
-  },
-  modalRow: { display: "flex", alignItems: "center", gap: 8, fontSize: 14 },
-  modalActions: { display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" },
-  bottomNav: {
-    position: "fixed", bottom: 0, left: 0, right: 0, height: 64,
-    background: "#131519", borderTop: "1px solid #23272E",
-    alignItems: "center", justifyContent: "space-around",
-    zIndex: 90, paddingBottom: "env(safe-area-inset-bottom, 0px)",
-  },
-  bottomNavBtn: {
-    background: "none", border: "none", display: "flex", flexDirection: "column",
-    alignItems: "center", gap: 3, cursor: "pointer", padding: "6px 10px", minWidth: 56,
-  },
-  bottomNavLabel: { fontSize: 11, fontWeight: 600 },
-  navBadge: {
-    position: "absolute", top: 2, right: "28%",
-    background: "#E5484D", color: "#fff", fontSize: 10, fontWeight: 800,
-    minWidth: 16, height: 16, borderRadius: 8, display: "flex",
-    alignItems: "center", justifyContent: "center", padding: "0 3px",
-    border: "1.5px solid #131519",
-  },
-  bottomNavFabSlot: { width: 58, flexShrink: 0 },
-  bottomNavFabFloating: {
-    position: "fixed", bottom: 34, left: "50%", transform: "translateX(-50%)",
-    background: "#FFB43A", border: "3px solid #0F1114", borderRadius: "50%",
-    width: 58, height: 58, alignItems: "center", justifyContent: "center",
-    cursor: "pointer", boxShadow: "0 10px 24px rgba(255,180,58,0.28)", zIndex: 91,
-  },
-  priorityAlertOverlay: {
-    position: "fixed", inset: 0, zIndex: 300,
-    background: "rgba(10,11,15,0.88)", backdropFilter: "blur(3px)",
-    display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
-  },
-  priorityAlertCard: {
-    width: "100%", maxWidth: 420, background: "#191C21",
-    border: "2px solid #FFB43A", borderRadius: 18, padding: 18,
-    boxShadow: "0 0 40px rgba(255,180,58,0.35)",
-    maxHeight: "88vh", overflowY: "auto",
-  },
-  priorityAlertTop: {
-    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-  },
-  priorityAlertPill: {
-    background: "#FFB43A", color: "#1A1206", fontWeight: 800,
-    fontSize: 12, letterSpacing: "0.04em", padding: "6px 10px", borderRadius: 999,
-  },
-  priorityAlertSub: {
-    color: "#8A9099", fontSize: 13, margin: "10px 0 14px",
-  },
-  priorityAlertBody: {
-    background: "#0F1114", border: "1px solid #23272E",
-    borderRadius: 12, padding: 14, marginBottom: 16,
-  },
-  priorityAlertRoute: {
-    display: "flex", flexDirection: "column", gap: 6, fontSize: 15, lineHeight: 1.4,
-  },
-  priorityAlertMeta: {
-    display: "flex", flexWrap: "wrap", gap: 12, marginTop: 12,
-    fontSize: 13, color: "#8A9099", alignItems: "center",
-  },
-  priorityAlertActions: { display: "flex", gap: 10 },
-  claimToast: {
-    position: "fixed", top: 16, left: 16, right: 16, maxWidth: 420, margin: "0 auto", zIndex: 250,
-    background: "#191C21", border: "1px solid #FFB43A", borderRadius: 14,
-    padding: "14px 16px", boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
-  },
-  claimToastHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 },
-  claimToastTitle: { display: "flex", alignItems: "center", fontSize: 14, color: "#F2F4F7" },
-  claimToastRoute: { fontSize: 13, color: "#B8BEC6", marginBottom: 12 },
-  claimToastActions: { display: "flex", gap: 10 },
-  claimToastHint: { fontSize: 11, color: "#6E757E", marginTop: 10, textAlign: "center" },
-  pullBanner: {
-    position: "fixed", top: 0, left: 0, right: 0, zIndex: 200,
-    background: "#FFB43A", color: "#1A1206", textAlign: "center",
-    padding: "10px 0", fontSize: 13, fontWeight: 700,
-  },
-};

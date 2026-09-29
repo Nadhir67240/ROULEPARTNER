@@ -5,3 +5,6 @@ dist
 
 .vercel
 .env*
+
+# Journaux des émulateurs Firebase
+*-debug.log

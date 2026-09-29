@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 
@@ -271,6 +272,70 @@ exports.notifyRideStatusChange = onDocumentUpdated(
   }
 );
 
+// --- Rappel avant la prise en charge ---
+// Toutes les 5 min, rappelle au chauffeur qui a pris une course (statut "prise", pas encore
+// démarrée) que la prise en charge approche. Un seul rappel par course (reminderSentAt).
+const REMINDER_BEFORE_MS = 30 * 60 * 1000;
+// Pas de rappel si la prise en charge est dans moins de 2 min : le chauffeur est déjà dessus.
+const REMINDER_MIN_LEAD_MS = 2 * 60 * 1000;
+
+// ride.date ("AAAA-MM-JJ") + ride.heure ("HH:MM") sont saisis à l'heure de Paris ; le serveur
+// tourne en UTC. On calcule le décalage de Paris à cette date (heure d'été/hiver comprise).
+function parisTimeToUtcMs(dateStr, timeStr) {
+  const [y, m, d] = String(dateStr).split("-").map(Number);
+  const [hh, mm] = String(timeStr).split(":").map(Number);
+  if ([y, m, d, hh, mm].some((n) => !Number.isFinite(n))) return null;
+  const guess = Date.UTC(y, m - 1, d, hh, mm);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Paris", hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }).formatToParts(new Date(guess));
+  const get = (type) => Number(parts.find((p) => p.type === type).value);
+  const guessAsParis = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"));
+  return guess - (guessAsParis - guess);
+}
+
+async function sendPickupReminders(now = Date.now()) {
+  const snap = await db.collection("rides").where("status", "==", "prise").get();
+  const due = [];
+  snap.forEach((doc) => {
+    const r = doc.data();
+    if (!r.takenBy || !r.date || !r.heure || r.reminderSentAt) return;
+    const pickupAt = parisTimeToUtcMs(r.date, r.heure);
+    if (pickupAt == null) return;
+    const lead = pickupAt - now;
+    if (lead > REMINDER_MIN_LEAD_MS && lead <= REMINDER_BEFORE_MS) due.push({ doc, r, lead });
+  });
+
+  for (const { doc, r, lead } of due) {
+    // Marqué AVANT l'envoi : si l'envoi échoue, on ne spamme pas le chauffeur toutes les 5 min.
+    await doc.ref.update({ reminderSentAt: now });
+    const minutes = Math.max(1, Math.round(lead / 60000));
+    const entries = await tokensFor([r.takenBy]);
+    await sendTo(entries, {
+      notification: {
+        title: `⏰ Prise en charge dans ${minutes} min`,
+        body: `${r.heure} — ${r.depart} → ${r.arrivee}${r.patient ? ` (${r.patient})` : ""}`,
+      },
+      data: {
+        rideId: doc.id,
+        depart: String(r.depart || ""),
+        arrivee: String(r.arrivee || ""),
+        heure: String(r.heure || ""),
+      },
+      requireInteraction: true,
+    }).catch((e) => console.error(`rappel ${doc.id}:`, e.message));
+  }
+  return due.map((d) => d.doc.id);
+}
+
+exports.remindUpcomingRides = onSchedule(
+  { schedule: "every 5 minutes", timeZone: "Europe/Paris", timeoutSeconds: 60 },
+  async () => {
+    const sent = await sendPickupReminders();
+    if (sent.length) console.log(`remindUpcomingRides: ${sent.length} rappel(s) — ${sent.join(", ")}`);
+  }
+);
 // Prévient l'admin à chaque nouvelle inscription de chauffeur. Reprend ce que faisait
 // l'ancien onNewProfile (index.js.js, racine, jamais nettoyé de la prod) — portée ici pour
 // pouvoir enfin supprimer ce doublon.

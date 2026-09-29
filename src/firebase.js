@@ -17,9 +17,11 @@ import {
   runTransaction,
   disableNetwork,
   enableNetwork,
+  connectFirestoreEmulator,
 } from "firebase/firestore";
 import {
   getAuth,
+  connectAuthEmulator,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -41,7 +43,12 @@ const firebaseConfig = {
   appId: "1:194366872374:web:a7a253a3d8068b62577197",
 };
 
-const app = initializeApp(firebaseConfig);
+// Tests en local uniquement : `VITE_USE_EMULATORS=true npm run dev` branche l'appli sur
+// les émulateurs Firebase (voir firebase.sim.json) au lieu de la production. Jamais
+// défini dans le build déployé, donc sans effet en ligne.
+const USE_EMULATORS = import.meta.env.VITE_USE_EMULATORS === "true";
+
+const app = initializeApp(USE_EMULATORS ? { ...firebaseConfig, projectId: "demo-roulepartner" } : firebaseConfig);
 // Cache local persistant (IndexedDB) : sans ça, une écriture (prendre une
 // course, envoyer un message...) faite pendant que le flux temps réel est
 // coupé (téléphone en veille/arrière-plan pendant 1-2h, comme en usage réel)
@@ -52,6 +59,10 @@ export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 export const auth = getAuth(app);
+if (USE_EMULATORS) {
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
 // Même région que setGlobalOptions() dans functions/index.js — sinon les appels
 // aux fonctions callable échouent silencieusement (mauvaise URL).
 const functions = getFunctions(app, "europe-west1");
