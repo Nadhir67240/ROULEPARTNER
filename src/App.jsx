@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
-  Phone, List, Map as MapIcon, History,
+  Phone, List, Map as MapIcon, History, CalendarDays,
   FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
   Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
 } from "lucide-react";
@@ -62,7 +62,8 @@ const AVG_SPEED_KMH = 32;
 const CLAIM_CONFIRM_WINDOW_MS = 30 * 1000;
 
 // Les courses terminées depuis plus de X jours sont purgées automatiquement (y compris leur photo).
-const AUTO_PURGE_DAYS = 14;
+// Conservées 1 an pour que le calendrier "Mes courses" garde l'historique.
+const AUTO_PURGE_DAYS = 365;
 
 // Doit correspondre exactement à l'email utilisé dans les règles Firestore.
 const ADMIN_EMAIL = "taxi-vsl67@hotmail.com";
@@ -200,6 +201,26 @@ function formatDayMonth(dateStr) {
 }
 
 const FRENCH_WEEKDAYS_SHORT = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+
+// Helpers du calendrier "Mes courses" — on travaille en clés "AAAA-MM-JJ" (même format
+// que ride.date) en heure locale, pour éviter les décalages de fuseau de toISOString().
+function keyFromDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function dateFromKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function addDaysKey(key, n) {
+  const d = dateFromKey(key);
+  d.setDate(d.getDate() + n);
+  return keyFromDate(d);
+}
+// Semaine du lundi au dimanche, comme en France.
+function startOfWeekKey(key) {
+  const d = dateFromKey(key);
+  return addDaysKey(key, -((d.getDay() + 6) % 7));
+}
 
 // Badge de timing d'une course : le chauffeur doit voir d'un coup d'oeil si
 // c'est pour tout de suite (rouge, pulse), pour bientôt aujourd'hui (orange),
@@ -1072,6 +1093,10 @@ export default function App() {
   const chatEndRef = useRef(null);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
   const [showMyCoursesPanel, setShowMyCoursesPanel] = useState(false);
+  const [myCoursesView, setMyCoursesView] = useState("liste"); // "liste" | "calendrier"
+  const [calPeriod, setCalPeriod] = useState("jour"); // "jour" | "semaine" | "mois"
+  const [calAnchor, setCalAnchor] = useState(() => todayKey(0));
+  const [calSelectedDay, setCalSelectedDay] = useState(() => todayKey(0));
 
   const markRideRead = (rideId) => {
     setLastReadByRide((prev) => {
@@ -2511,6 +2536,188 @@ export default function App() {
           <span style={styles.metaItem}><Clock size={13} /> {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
         </div>
       </div>
+    );
+  };
+
+  // ---- Calendrier "Mes courses" : courses prises + données, rangées par ride.date ----
+  const myCalendarRides = rides.filter(
+    (r) => r.date && (r.takenBy === driverName || r.postedBy === driverName)
+  );
+  const calRidesByDay = myCalendarRides.reduce((acc, r) => {
+    (acc[r.date] = acc[r.date] || []).push(r);
+    return acc;
+  }, {});
+  Object.values(calRidesByDay).forEach((list) =>
+    list.sort((a, b) => String(a.heure || "").localeCompare(String(b.heure || "")))
+  );
+
+  const calShift = (dir) => {
+    if (calPeriod === "jour") setCalAnchor(addDaysKey(calAnchor, dir));
+    else if (calPeriod === "semaine") setCalAnchor(addDaysKey(calAnchor, 7 * dir));
+    else {
+      const d = dateFromKey(calAnchor);
+      setCalAnchor(keyFromDate(new Date(d.getFullYear(), d.getMonth() + dir, 1)));
+    }
+  };
+
+  const calTitle = (() => {
+    if (calPeriod === "jour") {
+      const d = dateFromKey(calAnchor);
+      const label = calAnchor === todayKey(0) ? "Aujourd'hui" : calAnchor === todayKey(1) ? "Demain" : calAnchor === todayKey(-1) ? "Hier" : FRENCH_WEEKDAYS_SHORT[d.getDay()];
+      return `${label} ${formatDayMonth(calAnchor)}`;
+    }
+    if (calPeriod === "semaine") {
+      const start = startOfWeekKey(calAnchor);
+      return `${formatDayMonth(start)} – ${formatDayMonth(addDaysKey(start, 6))}`;
+    }
+    const d = dateFromKey(calAnchor);
+    return `${FRENCH_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  })();
+
+  const renderCalRideRow = (r) => {
+    const meta = typeMeta(r.type);
+    const isTaken = r.takenBy === driverName;
+    return (
+      <div
+        key={r.id}
+        onClick={() => { setSelectedRide(r); setShowMyCoursesPanel(false); }}
+        style={{
+          display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+          background: "#0F1114", border: "1px solid #23272E", borderLeft: `3px solid ${meta.color}`,
+          borderRadius: 10, padding: "10px 12px",
+        }}
+      >
+        <span className="rp-meter" style={{ fontSize: 15, fontWeight: 800, color: "#F2F4F7", minWidth: 44 }}>{r.heure || "--:--"}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "#F2F4F7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {cardLocality(r.depart)} → {cardLocality(r.arrivee)}
+          </div>
+          <div style={{ fontSize: 12, color: "#8A9099", marginTop: 2 }}>
+            {meta.label} · {isTaken ? "Prise" : "Donnée"}
+            {r.status === "terminee" ? " · Terminée" : r.status === "en_cours" ? " · En cours" : r.status === "en_attente" ? " · En attente" : ""}
+          </div>
+        </div>
+        {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
+      </div>
+    );
+  };
+
+  const renderCalDayList = (key) => {
+    const list = calRidesByDay[key] || [];
+    return list.length === 0 ? (
+      <p style={{ color: "#6E757E", fontSize: 13, margin: "4px 0 0" }}>Aucune course ce jour-là.</p>
+    ) : (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{list.map(renderCalRideRow)}</div>
+    );
+  };
+
+  const renderMyCoursesCalendar = () => {
+    const today = todayKey(0);
+    const periodBtn = (id, label) => (
+      <button
+        key={id}
+        onClick={() => { setCalPeriod(id); if (id === "mois") setCalSelectedDay(calAnchor); }}
+        style={{
+          flex: 1, border: "none", borderRadius: 8, padding: "9px 0", fontSize: 13.5, fontWeight: 700, cursor: "pointer",
+          background: calPeriod === id ? "#FFB43A" : "transparent", color: calPeriod === id ? "#1A1206" : "#B8BEC6",
+        }}
+      >
+        {label}
+      </button>
+    );
+
+    let body;
+    if (calPeriod === "jour") {
+      body = renderCalDayList(calAnchor);
+    } else if (calPeriod === "semaine") {
+      const start = startOfWeekKey(calAnchor);
+      body = (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {Array.from({ length: 7 }, (_, i) => addDaysKey(start, i)).map((key) => {
+            const count = (calRidesByDay[key] || []).length;
+            return (
+              <div key={key}>
+                <div style={{ ...styles.myCoursesSectionTitle, color: key === today ? "#FFB43A" : "#8A9099", marginBottom: 8 }}>
+                  {FRENCH_WEEKDAYS_SHORT[dateFromKey(key).getDay()]} {formatDayMonth(key)}
+                  {count > 0 && <span style={{ color: "#6E757E" }}>· {count}</span>}
+                </div>
+                {count > 0 ? renderCalDayList(key) : <div style={{ height: 1, background: "#1B1E23" }} />}
+              </div>
+            );
+          })}
+        </div>
+      );
+    } else {
+      const a = dateFromKey(calAnchor);
+      const firstKey = keyFromDate(new Date(a.getFullYear(), a.getMonth(), 1));
+      const gridStart = startOfWeekKey(firstKey);
+      const daysInMonth = new Date(a.getFullYear(), a.getMonth() + 1, 0).getDate();
+      const cellCount = Math.ceil(((dateFromKey(firstKey).getDay() + 6) % 7 + daysInMonth) / 7) * 7;
+      body = (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 16 }}>
+            {["L", "M", "M", "J", "V", "S", "D"].map((l, i) => (
+              <div key={i} style={{ textAlign: "center", fontSize: 11, fontWeight: 800, color: "#6E757E", paddingBottom: 4 }}>{l}</div>
+            ))}
+            {Array.from({ length: cellCount }, (_, i) => addDaysKey(gridStart, i)).map((key) => {
+              const inMonth = dateFromKey(key).getMonth() === a.getMonth();
+              const count = (calRidesByDay[key] || []).length;
+              const selected = key === calSelectedDay;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setCalSelectedDay(key)}
+                  style={{
+                    aspectRatio: "1", border: key === today ? "1.5px solid #FFB43A" : "1px solid #23272E",
+                    borderRadius: 8, cursor: "pointer", padding: 0,
+                    background: selected ? "#FFB43A" : "#0F1114",
+                    color: selected ? "#1A1206" : inMonth ? "#E4E7EB" : "#4A5058",
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3,
+                    fontSize: 13.5, fontWeight: 700,
+                  }}
+                >
+                  {dateFromKey(key).getDate()}
+                  <span style={{
+                    minWidth: 16, height: 16, borderRadius: 8, fontSize: 10, fontWeight: 800, lineHeight: "16px",
+                    background: count ? (selected ? "#1A1206" : "#FFB43A") : "transparent",
+                    color: selected ? "#FFB43A" : "#1A1206",
+                  }}>
+                    {count || ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={styles.myCoursesSectionTitle}>
+            {FRENCH_WEEKDAYS_SHORT[dateFromKey(calSelectedDay).getDay()]} {formatDayMonth(calSelectedDay)}
+          </div>
+          {renderCalDayList(calSelectedDay)}
+        </>
+      );
+    }
+
+    return (
+      <>
+        <div style={{ display: "flex", gap: 4, background: "#191C21", borderRadius: 10, padding: 4, marginBottom: 14 }}>
+          {periodBtn("jour", "Aujourd'hui")}
+          {periodBtn("semaine", "Semaine")}
+          {periodBtn("mois", "Mois")}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 16 }}>
+          <button onClick={() => calShift(-1)} style={styles.wizardNavBtn} aria-label="Précédent"><ChevronLeft size={20} /></button>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: 15.5, color: "#F2F4F7", textTransform: calPeriod === "mois" ? "capitalize" : "none" }}>{calTitle}</div>
+            <button
+              onClick={() => { setCalAnchor(today); setCalSelectedDay(today); }}
+              style={{ background: "none", border: "none", color: "#FFB43A", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}
+            >
+              Revenir à aujourd'hui
+            </button>
+          </div>
+          <button onClick={() => calShift(1)} style={styles.wizardNavBtn} aria-label="Suivant"><ChevronRight size={20} /></button>
+        </div>
+        {body}
+      </>
     );
   };
 
@@ -4534,6 +4741,28 @@ export default function App() {
             </button>
           </div>
           <div style={styles.wizardBody}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+              {[
+                { id: "liste", label: "Liste", icon: List },
+                { id: "calendrier", label: "Calendrier", icon: CalendarDays },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setMyCoursesView(t.id)}
+                  style={{
+                    flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                    borderRadius: 10, padding: "11px 0", fontSize: 14, fontWeight: 700, cursor: "pointer",
+                    border: myCoursesView === t.id ? "1.5px solid #FFB43A" : "1.5px solid #23272E",
+                    background: myCoursesView === t.id ? "rgba(255,180,58,0.12)" : "transparent",
+                    color: myCoursesView === t.id ? "#FFB43A" : "#B8BEC6",
+                  }}
+                >
+                  <t.icon size={16} /> {t.label}
+                </button>
+              ))}
+            </div>
+
+            {myCoursesView === "calendrier" ? renderMyCoursesCalendar() : (<>
             <div style={styles.myCoursesSectionTitle}>
               <Car size={13} /> Courses prises ({myTakenRides.length})
             </div>
@@ -4559,6 +4788,7 @@ export default function App() {
                 {myPostedRides.map((r) => renderMyCourseCard(r))}
               </div>
             )}
+            </>)}
           </div>
         </div>
       )}
