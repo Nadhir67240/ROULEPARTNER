@@ -1673,10 +1673,21 @@ export default function App() {
     });
   }, [rides]);
 
+  const driverNameRef = useRef(driverName);
+  useEffect(() => {
+    driverNameRef.current = driverName;
+  }, [driverName]);
+
+  // Auto-confirmation après CLAIM_CONFIRM_WINDOW_MS. Seuls le posteur et le demandeur
+  // la tentent : les règles Firestore refusent tous les autres, et si chaque téléphone
+  // ouvert essayait chaque seconde, les refus en boucle bloquaient leurs autres
+  // écritures (prises de course comprises) — constaté en simulation à 30 chauffeurs.
   useEffect(() => {
     const id = setInterval(() => {
       const now = Date.now();
+      const me = driverNameRef.current;
       ridesRef.current.forEach((r) => {
+        if (!me || (r.postedBy !== me && r.pendingBy !== me)) return;
         if (r.status === "en_attente" && r.pendingSince && now - r.pendingSince > CLAIM_CONFIRM_WINDOW_MS) {
           confirmClaim(r);
         }
@@ -2022,6 +2033,10 @@ export default function App() {
       } else if (e.message === "ride_gone") {
         setError("Cette course n'existe plus.");
         setSelectedRide(null);
+      } else if (e.code === "permission-denied") {
+        // Refus des règles : priorité pas encore attribuée par le serveur, ou réservée
+        // à un chauffeur plus proche pendant la fenêtre.
+        setError("Cette course n'est pas encore ouverte pour toi — réessaie dans quelques secondes.");
       } else {
         setError("Échec de l'action.");
       }
@@ -2204,6 +2219,19 @@ export default function App() {
   // Fin de la fenêtre de priorité : la valeur écrite par le serveur (priorityUntil) fait foi
   // dès qu'elle existe, sinon on l'estime depuis l'heure de création de la course.
   const priorityWindowEndsAt = (ride) => ride.priorityUntil ?? (ride.createdAt + PRIORITY_WINDOW_MS);
+
+  // Tant que la Cloud Function n'a pas écrit priorityDrivers (≈1 s après la publication,
+  // plus si elle démarre à froid), les règles Firestore refusent TOUTE prise, même d'un
+  // chauffeur prioritaire : on grise donc "Je la prends" plutôt que de laisser le
+  // chauffeur tomber sur un échec incompréhensible.
+  const awaitingServerPriority = (ride) =>
+    ride.status === "disponible" && !Array.isArray(ride.priorityDrivers);
+
+  const renderAwaitingClaimBtn = (style) => (
+    <button disabled style={{ ...style, opacity: 0.55, cursor: "wait" }} onClick={(e) => e.stopPropagation()}>
+      <Timer size={14} style={{ marginRight: 4 }} /> Attribution en cours…
+    </button>
+  );
 
   const myPos = positions[driverName] || null;
 
@@ -2790,15 +2818,19 @@ export default function App() {
                 >
                   Je la laisse
                 </button>
-                <button
-                  style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 15, justifyContent: "center" }}
-                  onClick={async () => {
-                    await claim(r);
-                    setPriorityAlert(null);
-                  }}
-                >
-                  Je la prends
-                </button>
+                {awaitingServerPriority(rides.find((x) => x.id === r.id) || r)
+                  ? renderAwaitingClaimBtn({ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 15, justifyContent: "center" })
+                  : (
+                    <button
+                      style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 15, justifyContent: "center" }}
+                      onClick={async () => {
+                        await claim(r);
+                        setPriorityAlert(null);
+                      }}
+                    >
+                      Je la prends
+                    </button>
+                  )}
               </div>
             </div>
           </div>
@@ -3758,10 +3790,12 @@ export default function App() {
                   <span style={styles.postedBy}>Posté par {r.postedBy} · {formatPostedAt(r.createdAt)}</span>
                   <div style={{ display: "flex", gap: 8 }}>
                     {r.status === "disponible" && !mine && !isPriorityLocked && (
-                      <button onClick={(e) => { e.stopPropagation(); claim(r); }} style={styles.btnClaim}>
-                        <Check size={14} style={{ marginRight: 4 }} />
-                        Je la prends
-                      </button>
+                      awaitingServerPriority(r) ? renderAwaitingClaimBtn(styles.btnClaim) : (
+                        <button onClick={(e) => { e.stopPropagation(); claim(r); }} style={styles.btnClaim}>
+                          <Check size={14} style={{ marginRight: 4 }} />
+                          Je la prends
+                        </button>
+                      )
                     )}
                     {r.status === "en_attente" && mine && (
                       <>
@@ -4033,9 +4067,11 @@ export default function App() {
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20, paddingTop: 16, borderTop: "1px solid #3A4048" }}>
                 {r.status === "disponible" && !mine && !isPriorityLocked && (
-                  <button onClick={() => claim(r)} style={styles.btnPrimaryAction}>
-                    <Check size={16} /> Je la prends
-                  </button>
+                  awaitingServerPriority(r) ? renderAwaitingClaimBtn(styles.btnPrimaryAction) : (
+                    <button onClick={() => claim(r)} style={styles.btnPrimaryAction}>
+                      <Check size={16} /> Je la prends
+                    </button>
+                  )
                 )}
                 {r.status === "en_attente" && mine && (
                   <div style={{ display: "flex", gap: 8 }}>
