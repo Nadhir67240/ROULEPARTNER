@@ -51,10 +51,12 @@ that `App.jsx` calls directly — there is no separate data layer/store.
 uniqueness at signup), `fcmTokens`. Driver **display name**, not UID, is used as the primary
 key/identity across collections (profiles, positions, chat participants, ban/delete logic).
 
-Firestore security rules are **not stored in this repo** — they're edited directly in the
-Firebase console (see `README.md` for the current ruleset). Keep that in mind: rule changes
-implied by a feature change need to be called out to the user rather than committed as a
-file here.
+Firestore security rules live in `firestore.rules` (referenced by `firebase.json`) and are
+deployed from the repo with `firebase deploy --only firestore:rules` — the live ruleset was
+verified identical to the repo file on 2026-09-29. `scripts/test-regles.mjs` tests the ride
+rules against the emulators (`firebase emulators:start --config firebase.sim.json --only
+auth,firestore --project demo-roulepartner`). Rule changes must stay in sync with the ride
+writes in `src/firebase.js` / `src/App.jsx` (e.g. `pendingAt` server timestamp on claims).
 
 **Priority dispatch logic is duplicated** between the client and the Cloud Function and must
 stay in sync manually:

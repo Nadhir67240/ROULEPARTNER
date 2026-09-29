@@ -6,6 +6,7 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -18,6 +19,7 @@ import {
   disableNetwork,
   enableNetwork,
   connectFirestoreEmulator,
+  serverTimestamp,
 } from "firebase/firestore";
 import {
   getAuth,
@@ -163,6 +165,38 @@ export function listenRides(callback, maxCount = 200) {
   });
 }
 
+// Toutes les courses d'un chauffeur (postées OU prises), sans la limite de 200 de
+// listenRides : c'est ce qui alimente "Mes courses", son calendrier et les gains, qui
+// doivent couvrir l'historique complet (conservé AUTO_PURGE_DAYS) et pas seulement les
+// dernières courses de tout le monde. Deux requêtes simples (égalité sur un seul champ,
+// pas d'index composite nécessaire), fusionnées.
+export function listenMyRides(driverName, callback) {
+  if (!driverName) {
+    callback([]);
+    return () => {};
+  }
+  let posted = [];
+  let taken = [];
+  const emit = () => {
+    const byId = new Map();
+    [...posted, ...taken].forEach((r) => byId.set(r.id, r));
+    callback([...byId.values()]);
+  };
+  const toRides = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const unsubPosted = onSnapshot(query(ridesCol, where("postedBy", "==", driverName)), (snap) => {
+    posted = toRides(snap);
+    emit();
+  });
+  const unsubTaken = onSnapshot(query(ridesCol, where("takenBy", "==", driverName)), (snap) => {
+    taken = toRides(snap);
+    emit();
+  });
+  return () => {
+    unsubPosted();
+    unsubTaken();
+  };
+}
+
 export async function addRide(ride) {
   const ref = doc(ridesCol, ride.id);
   await setDoc(ref, ride);
@@ -187,6 +221,22 @@ export async function deleteRide(id) {
 // et refuse si la course n'est plus disponible. Un seul chauffeur peut gagner.
 export async function claimRide(id, driverName) {
   const ref = doc(ridesCol, id);
+  try {
+    await claimRideTx(ref, driverName);
+  } catch (e) {
+    // Course prise par un autre à la même seconde : la transaction a lu "disponible", mais
+    // à l'écriture les règles voient déjà "en_attente" et refusent (permission-denied).
+    // On relit pour donner le bon message ("Trop tard") plutôt qu'un refus incompréhensible.
+    if (e.code === "permission-denied") {
+      const snap = await getDoc(ref).catch(() => null);
+      if (snap && !snap.exists()) throw new Error("ride_gone");
+      if (snap && snap.data().status !== "disponible") throw new Error("already_taken");
+    }
+    throw e;
+  }
+}
+
+async function claimRideTx(ref, driverName) {
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists()) throw new Error("ride_gone");
@@ -195,7 +245,11 @@ export async function claimRide(id, driverName) {
     tx.update(ref, {
       status: "en_attente",
       pendingBy: driverName,
-      pendingSince: Date.now(),
+      pendingSince: Date.now(), // affichage du compte à rebours (horloge du téléphone)
+      // Heure SERVEUR de la demande : les règles Firestore s'en servent pour n'autoriser
+      // le demandeur à se confirmer lui-même qu'après les 30 s laissées au posteur
+      // (pendingSince, écrit par le téléphone, pourrait être antidaté).
+      pendingAt: serverTimestamp(),
     });
   });
 }

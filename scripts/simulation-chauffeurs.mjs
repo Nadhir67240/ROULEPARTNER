@@ -15,7 +15,7 @@ import {
 } from "firebase/auth";
 import {
   getFirestore, connectFirestoreEmulator, doc, setDoc, updateDoc, onSnapshot,
-  query, collection, orderBy, limit, runTransaction,
+  query, collection, orderBy, limit, runTransaction, serverTimestamp,
 } from "firebase/firestore";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -186,7 +186,7 @@ class Driver {
         if (process.env.SIM_CORRECTIF === "1" && r.postedBy !== this.name && r.pendingBy !== this.name) continue;
         if (r.status === "en_attente" && r.pendingSince && now - r.pendingSince > CLAIM_CONFIRM_WINDOW_MS) {
           updateDoc(doc(this.db, "rides", r.id), {
-            status: "prise", takenBy: r.pendingBy, pendingBy: null, pendingSince: null,
+            status: "prise", takenBy: r.pendingBy, pendingBy: null, pendingSince: null, pendingAt: null,
           }).then(() => {
             autoConfirm.success++;
             R(r.id).confirmActions.push({ t: Date.now(), by: this.name, kind: "auto-30s" });
@@ -222,12 +222,12 @@ class Driver {
         // Un refus maximum par course, sinon on confirme.
         if (plan === "refuse" && !log0.refusedOnce) {
           log0.refusedOnce = true;
-          await updateDoc(doc(this.db, "rides", r.id), { status: "disponible", pendingBy: null, pendingSince: null });
+          await updateDoc(doc(this.db, "rides", r.id), { status: "disponible", pendingBy: null, pendingSince: null, pendingAt: null });
           log0.confirmActions.push({ t: Date.now(), by: this.name, kind: `refus de ${r.pendingBy}` });
           log(`❌ ${this.name} REFUSE ${r.pendingBy} sur ${log0.label}`);
         } else {
           await updateDoc(doc(this.db, "rides", r.id), {
-            status: "prise", takenBy: r.pendingBy, pendingBy: null, pendingSince: null,
+            status: "prise", takenBy: r.pendingBy, pendingBy: null, pendingSince: null, pendingAt: null,
           });
           log0.confirmActions.push({ t: Date.now(), by: this.name, kind: "confirmation posteur" });
           log(`✅ ${this.name} CONFIRME ${r.pendingBy} sur ${log0.label}`);
@@ -312,7 +312,7 @@ class Driver {
         if (!snap.exists()) throw new Error("ride_gone");
         const data = snap.data();
         if (data.status !== "disponible") throw new Error("already_taken");
-        tx.update(ref, { status: "en_attente", pendingBy: this.name, pendingSince: Date.now() });
+        tx.update(ref, { status: "en_attente", pendingBy: this.name, pendingSince: Date.now(), pendingAt: serverTimestamp() });
       });
       result = "GAGNÉ";
     } catch (e) {

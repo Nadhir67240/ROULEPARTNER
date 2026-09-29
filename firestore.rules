@@ -40,6 +40,52 @@ service cloud.firestore {
       );
     }
 
+    function changedOnly(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+    // "Je la prends" : disponible -> en_attente. pendingAt doit être l'heure SERVEUR de la
+    // requête (serverTimestamp), impossible à antidater.
+    function isClaim() {
+      return resource.data.status == 'disponible'
+        && request.resource.data.status == 'en_attente'
+        && request.resource.data.pendingBy == request.auth.token.name
+        && request.resource.data.pendingAt == request.time
+        && changedOnly(['status', 'pendingBy', 'pendingSince', 'pendingAt'])
+        && isPriorityEligible();
+    }
+    // Le demandeur annule sa demande.
+    function isRequesterCancel() {
+      return resource.data.status == 'en_attente'
+        && resource.data.pendingBy == request.auth.token.name
+        && request.resource.data.status == 'disponible'
+        && request.resource.data.get('pendingBy', null) == null
+        && changedOnly(['status', 'pendingBy', 'pendingSince', 'pendingAt']);
+    }
+    // Le demandeur se confirme lui-même, mais seulement une fois écoulées les 30 s laissées
+    // au posteur pour valider ou refuser (même délai que CLAIM_CONFIRM_WINDOW_MS dans l'appli).
+    function isRequesterAutoConfirm() {
+      return resource.data.status == 'en_attente'
+        && resource.data.pendingBy == request.auth.token.name
+        && resource.data.get('pendingAt', null) is timestamp
+        && request.time > resource.data.pendingAt + duration.value(30, 's')
+        && request.resource.data.status == 'prise'
+        && request.resource.data.takenBy == request.auth.token.name
+        && request.resource.data.get('pendingBy', null) == null
+        && changedOnly(['status', 'takenBy', 'pendingBy', 'pendingSince', 'pendingAt']);
+    }
+    // Celui qui a la course : la démarrer, la terminer, ou la relâcher avant de la commencer.
+    function isTakerAction() {
+      return resource.data.takenBy == request.auth.token.name && (
+        (resource.data.status == 'prise' && request.resource.data.status == 'en_cours'
+          && changedOnly(['status', 'startedAt']))
+        || (resource.data.status in ['prise', 'en_cours'] && request.resource.data.status == 'terminee'
+          && changedOnly(['status']))
+        || (resource.data.status == 'prise' && request.resource.data.status == 'disponible'
+          && request.resource.data.get('takenBy', null) == null
+          && changedOnly(['status', 'takenBy']))
+      );
+    }
+
     match /rides/{rideId} {
       allow read: if isVerified();
       allow create: if isAdmin() || (
@@ -49,17 +95,15 @@ service cloud.firestore {
         && !('priorityUntil' in request.resource.data)
       );
       allow delete: if isAdmin() || (isVerified() && !isBanned() && resource.data.postedBy == request.auth.token.name);
+      // Le posteur garde la main sur sa course (modifier, confirmer, refuser...). Les autres
+      // chauffeurs n'ont droit qu'aux gestes prévus par l'appli, champ par champ :
       allow update: if isAdmin() || (
         isVerified() && !isBanned() && priorityFieldsUnchanged() && (
           resource.data.postedBy == request.auth.token.name
-          || resource.data.takenBy == request.auth.token.name
-          || resource.data.pendingBy == request.auth.token.name
-          || (
-            resource.data.status == 'disponible'
-            && request.resource.data.status == 'en_attente'
-            && request.resource.data.pendingBy == request.auth.token.name
-            && isPriorityEligible()
-          )
+          || isClaim()
+          || isRequesterCancel()
+          || isRequesterAutoConfirm()
+          || isTakerAction()
         )
       );
     }

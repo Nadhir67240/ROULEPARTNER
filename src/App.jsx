@@ -9,7 +9,7 @@ import {
   Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
 } from "lucide-react";
 import {
-  listenRides, addRide, updateRide, deleteRide, claimRide,
+  listenRides, listenMyRides, addRide, updateRide, deleteRide, claimRide,
   listenPositions, setDriverPosition, clearDriverPosition,
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
@@ -49,6 +49,7 @@ export default function App() {
   };
   const driverName = user?.displayName || "";
   const [rides, setRides] = useState([]);
+  const [myRides, setMyRides] = useState([]); // historique complet du chauffeur (listenMyRides)
   const [positions, setPositions] = useState({});
   const [profiles, setProfiles] = useState({});
   const [phoneInput, setPhoneInput] = useState("");
@@ -1112,7 +1113,7 @@ export default function App() {
 
   const confirmClaim = async (ride) => {
     try {
-      await updateRide(ride.id, { status: "prise", takenBy: ride.pendingBy, pendingBy: null, pendingSince: null });
+      await updateRide(ride.id, { status: "prise", takenBy: ride.pendingBy, pendingBy: null, pendingSince: null, pendingAt: null });
     } catch (e) {
       setError("Échec de l'action.");
     }
@@ -1120,7 +1121,7 @@ export default function App() {
 
   const refuseClaim = async (id) => {
     try {
-      await updateRide(id, { status: "disponible", pendingBy: null, pendingSince: null });
+      await updateRide(id, { status: "disponible", pendingBy: null, pendingSince: null, pendingAt: null });
     } catch (e) {
       setError("Échec de l'action.");
     }
@@ -1128,7 +1129,7 @@ export default function App() {
 
   const cancelMyClaim = async (id) => {
     try {
-      await updateRide(id, { status: "disponible", pendingBy: null, pendingSince: null });
+      await updateRide(id, { status: "disponible", pendingBy: null, pendingSince: null, pendingAt: null });
     } catch (e) {
       setError("Échec de l'action.");
     }
@@ -1338,12 +1339,32 @@ export default function App() {
     ...rides.map((r) => r.takenBy).filter(Boolean),
   ]));
 
-  const myTakenRides = rides
+  // Mes courses = historique complet (listenMyRides) + le flux général (plus frais pour
+  // les courses toutes récentes). Le flux général seul s'arrête aux 200 dernières courses
+  // de TOUS les chauffeurs, ce qui vidait le calendrier au bout de quelques jours.
+  useEffect(() => {
+    if (!user || !user.emailVerified) {
+      setMyRides([]);
+      return undefined;
+    }
+    return listenMyRides(driverName, setMyRides);
+  }, [user, driverName]);
+
+  const myRidesAll = useMemo(() => {
+    const byId = new Map();
+    myRides.forEach((r) => byId.set(r.id, r));
+    rides.forEach((r) => {
+      if (r.postedBy === driverName || r.takenBy === driverName) byId.set(r.id, r);
+    });
+    return [...byId.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [myRides, rides, driverName]);
+
+  const myTakenRides = myRidesAll
     .filter((r) => r.takenBy === driverName)
     .filter((r) => !dateFilter || dateKey(r.createdAt) === dateFilter);
   const myEarnings = myTakenRides.reduce((sum, r) => sum + (parseFloat(String(r.tarif).replace(",", ".")) || 0), 0);
 
-  const myPostedRides = rides
+  const myPostedRides = myRidesAll
     .filter((r) => r.postedBy === driverName)
     .filter((r) => !dateFilter || dateKey(r.createdAt) === dateFilter);
   const myPostedValue = myPostedRides.reduce((sum, r) => sum + (parseFloat(String(r.tarif).replace(",", ".")) || 0), 0);
@@ -1636,9 +1657,7 @@ export default function App() {
   };
 
   // ---- Calendrier "Mes courses" : courses prises + données, rangées par ride.date ----
-  const myCalendarRides = rides.filter(
-    (r) => r.date && (r.takenBy === driverName || r.postedBy === driverName)
-  );
+  const myCalendarRides = myRidesAll.filter((r) => r.date);
   const calRidesByDay = myCalendarRides.reduce((acc, r) => {
     (acc[r.date] = acc[r.date] || []).push(r);
     return acc;
