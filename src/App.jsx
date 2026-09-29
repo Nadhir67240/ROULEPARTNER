@@ -294,6 +294,42 @@ function unlockAudio() {
   }
 }
 
+// Brouillon de la course en cours de saisie, gardé sur le téléphone : un rafraîchissement
+// (volontaire ou "tirer vers le bas" par erreur) rouvre le formulaire là où on en était.
+// Au-delà de 12 h, le brouillon est considéré comme abandonné.
+const RIDE_DRAFT_KEY = "rp-ride-draft";
+const RIDE_DRAFT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+function loadRideDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(RIDE_DRAFT_KEY));
+    if (!d || !d.form || Date.now() - d.savedAt > RIDE_DRAFT_MAX_AGE_MS) return null;
+    return d;
+  } catch (e) {
+    return null;
+  }
+}
+function saveRideDraft(draft) {
+  try {
+    localStorage.setItem(RIDE_DRAFT_KEY, JSON.stringify(draft));
+  } catch (e) {
+    // Stockage plein (photo/document trop lourds) : on garde au moins le reste de la saisie.
+    try {
+      localStorage.setItem(RIDE_DRAFT_KEY, JSON.stringify({
+        ...draft, form: { ...draft.form, photo: null, document: null, documentName: "" },
+      }));
+    } catch (e2) {
+      // ignore
+    }
+  }
+}
+function clearRideDraft() {
+  try {
+    localStorage.removeItem(RIDE_DRAFT_KEY);
+  } catch (e) {
+    // ignore
+  }
+}
+
 // Une couleur distincte par étape de la course, pour la lire d'un coup d'œil.
 const STATUS_COLORS = {
   disponible: "#3BD07A", // vert : à prendre
@@ -1184,10 +1220,11 @@ export default function App() {
     setRadiusFilter(value);
     localStorage.setItem("radius-filter", value);
   };
-  const [showForm, setShowForm] = useState(false);
-  const [formStep, setFormStep] = useState(1);
-  const [pickupMode, setPickupMode] = useState(null); // null | "now" | "time" | "datetime"
-  const [form, setForm] = useState(emptyForm);
+  const [initialDraft] = useState(loadRideDraft);
+  const [showForm, setShowForm] = useState(() => !!initialDraft);
+  const [formStep, setFormStep] = useState(() => initialDraft?.formStep || 1);
+  const [pickupMode, setPickupMode] = useState(() => initialDraft?.pickupMode ?? null); // null | "now" | "time" | "datetime"
+  const [form, setForm] = useState(() => (initialDraft ? { ...emptyForm, ...initialDraft.form } : emptyForm));
   const [error, setError] = useState("");
   const [, setTick] = useState(0);
   const [selectedRide, setSelectedRide] = useState(null);
@@ -1346,6 +1383,31 @@ export default function App() {
   const mapMarkersRef = useRef({});
   const mapMarkerStatusRef = useRef({}); // name -> "busy"/"free" déjà affiché, pour éviter de recréer l'icône inutilement
   const [editingId, setEditingId] = useState(null);
+
+  // Sauvegarde du brouillon à chaque modification tant que le formulaire de NOUVELLE
+  // course est ouvert ; effacé dès qu'il se ferme (publié ou annulé). Les modifications
+  // d'une course existante ne sont pas concernées : la course est déjà enregistrée.
+  useEffect(() => {
+    if (!showForm) {
+      clearRideDraft();
+      return;
+    }
+    if (editingId) return;
+    saveRideDraft({ form, formStep, pickupMode, savedAt: Date.now() });
+  }, [showForm, editingId, form, formStep, pickupMode]);
+
+  // Pendant la saisie, le geste "tirer vers le bas" ne doit pas recharger la page.
+  useEffect(() => {
+    if (!showForm) return;
+    const html = document.documentElement;
+    const prev = [html.style.overscrollBehaviorY, document.body.style.overscrollBehaviorY];
+    html.style.overscrollBehaviorY = "contain";
+    document.body.style.overscrollBehaviorY = "contain";
+    return () => {
+      html.style.overscrollBehaviorY = prev[0];
+      document.body.style.overscrollBehaviorY = prev[1];
+    };
+  }, [showForm]);
   // Valeurs "tarif-sensibles" de la course telle qu'elle existait avant l'ouverture de la
   // modification (adresses, trajet, majorations). Le formulaire d'édition se remplit avec ces
   // mêmes valeurs, ce qui ne doit PAS déclencher de recalcul (sinon on écraserait un tarif déjà
@@ -1468,6 +1530,15 @@ export default function App() {
     const unsub = watchAuthState((u) => {
       setUser(u);
       setAuthLoading(false);
+      // Déconnecté : on jette le brouillon de course (il peut contenir des infos patient)
+      // pour qu'un autre chauffeur se connectant sur ce téléphone ne le retrouve pas.
+      if (!u) {
+        clearRideDraft();
+        setShowForm(false);
+        setForm(emptyForm);
+        setFormStep(1);
+        setPickupMode(null);
+      }
     });
     return () => unsub();
   }, []);
@@ -5122,7 +5193,7 @@ const styles = {
   wizardStepDots: { display: "flex", gap: 6 },
   wizardStepDot: { height: 4, borderRadius: 2, flex: 1, background: "#23272E" },
   wizardStepDotActive: { background: "#FFB43A" },
-  wizardBody: { flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 20px 28px" },
+  wizardBody: { flex: 1, minHeight: 0, overflowY: "auto", overscrollBehaviorY: "contain", padding: "20px 20px 28px" },
   wizardTitle: { fontSize: 21, fontWeight: 800, margin: "0 0 4px", fontFamily: "'Manrope', sans-serif", letterSpacing: "-0.01em" },
   wizardSubtitle: { fontSize: 13, color: "#8A9099", margin: "0 0 22px" },
   wizardSectionTitle: {
