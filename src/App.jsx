@@ -294,6 +294,32 @@ function unlockAudio() {
   }
 }
 
+// Une couleur distincte par étape de la course, pour la lire d'un coup d'œil.
+const STATUS_COLORS = {
+  disponible: "#3BD07A", // vert : à prendre
+  en_attente: "#FFB43A", // orange : demande en cours de confirmation
+  prise: "#4FA3FF",      // bleu : attribuée, pas encore démarrée
+  en_cours: "#B18CFF",   // violet : patient à bord
+  terminee: "#6E757E",   // gris : finie
+};
+const statusColor = (status) => STATUS_COLORS[status] || "#FFB43A";
+
+// Vibration en plus du son : au volant ou dans le bruit, on la sent même sans
+// entendre l'alerte. Sans effet sur iPhone (Safari ne gère pas l'API Vibration).
+const VIBRATION = {
+  priority: [400, 150, 400, 150, 400, 150, 800],
+  claim: [300, 120, 300],
+  urgent: [250, 100, 250],
+  normal: [200],
+};
+function vibrate(kind) {
+  try {
+    if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(VIBRATION[kind] || VIBRATION.normal);
+  } catch (e) {
+    // ignore
+  }
+}
+
 function playAlertSound(urgent) {
   try {
     const ctx = getAudioCtx();
@@ -1545,9 +1571,11 @@ export default function App() {
               // Alerte plein écran, où que je sois dans l'appli : je ne suis pas
               // sorti de mon écran courant, la course s'affiche par-dessus.
               notifyPriorityRide(r, prio.length > 1);
+              vibrate("priority");
               setPriorityAlert({ ride: r, shared: prio.length > 1 });
             } else {
               notifyNewRide(r);
+              vibrate(r.urgent ? "urgent" : "normal");
             }
             if (filterRef.current !== "dispo") setNewRidesBadge((n) => n + 1);
           }
@@ -1557,6 +1585,7 @@ export default function App() {
               // Où que je sois dans l'appli, un popup s'affiche par-dessus pour
               // me dire tout de suite qui veut prendre la course que j'ai postée.
               notifyClaimRequest(r);
+              vibrate("claim");
               setClaimAlert({ ride: r });
             }
             if (r.status === "disponible" && prevStatus === "prise" && prevInfo?.takenBy) {
@@ -1781,6 +1810,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverName]);
 
+  // En service (position partagée), on garde l'écran allumé : pas de veille qui ferait
+  // rater une alerte ou couperait l'envoi du GPS. Le navigateur relâche ce verrou dès
+  // que l'appli passe en arrière-plan, donc on le redemande à chaque retour au premier plan.
+  useEffect(() => {
+    if (myPosStatus !== "ok" || typeof navigator === "undefined" || !navigator.wakeLock) return;
+    let lock = null;
+    let cancelled = false;
+    const acquire = async () => {
+      if (document.visibilityState !== "visible" || (lock && !lock.released)) return;
+      try {
+        lock = await navigator.wakeLock.request("screen");
+        if (cancelled) lock.release().catch(() => {});
+      } catch (e) {
+        // refusé (batterie faible, navigateur non compatible…) : on ignore
+      }
+    };
+    acquire();
+    document.addEventListener("visibilitychange", acquire);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", acquire);
+      if (lock) lock.release().catch(() => {});
+    };
+  }, [myPosStatus]);
+
   // Coupe le suivi GPS si la page se ferme, pour ne pas laisser le capteur tourner inutilement.
   useEffect(() => {
     return () => {
@@ -1791,7 +1845,16 @@ export default function App() {
   const handlePost = async (e) => {
     e.preventDefault();
     if (Date.now() - step3EnteredAtRef.current < 500) return;
+    await submitRide();
+  };
+
+  // Enregistre la course du formulaire. Appelé par la dernière étape ET par la
+  // publication express de l'étape 2 (patient, notes et pièces jointes facultatifs).
+  const postingRef = useRef(false);
+  const submitRide = async () => {
     if (!form.depart || !form.arrivee || !form.heure) return;
+    if (postingRef.current) return; // double appui : une seule publication
+    postingRef.current = true;
     const myPos = positions[driverName] || null;
     try {
       if (editingId) {
@@ -1816,6 +1879,8 @@ export default function App() {
       setPickupMode(null);
     } catch (e) {
       setError("Échec de l'enregistrement (vérifie ta config Firebase).");
+    } finally {
+      postingRef.current = false;
     }
   };
 
@@ -2536,7 +2601,7 @@ export default function App() {
           <span
             style={{
               ...styles.statusTag,
-              color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
+              color: statusColor(r.status), background: tintBg(statusColor(r.status), 0.14),
             }}
           >
             {r.status === "disponible" ? "Disponible"
@@ -3385,6 +3450,26 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* Publication express : départ, arrivée et heure suffisent. Le reste
+                      (patient, notes, pièces jointes) est facultatif et se complète après
+                      via "Modifier" si besoin. Pas en mode modification. */}
+                  {!editingId && form.heure && (
+                    <div style={styles.expressBox}>
+                      <div style={{ fontSize: 14, color: "#B8BEC6", marginBottom: 10 }}>
+                        Pressé ? Publie tout de suite — patient, notes et documents sont facultatifs.
+                        {form.tarif && !calculatingTarif && <> Tarif calculé : <strong style={{ color: "#F2F4F7" }}>{form.tarif} €</strong>.</>}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={calculatingTarif}
+                        onClick={submitRide}
+                        style={{ ...styles.btnPrimaryAction, opacity: calculatingTarif ? 0.6 : 1 }}
+                      >
+                        <Send size={18} /> {calculatingTarif ? "Calcul du tarif…" : "Publier maintenant"}
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -3692,7 +3777,7 @@ export default function App() {
                   </div>
                   <span style={{
                     ...styles.statusTag,
-                    color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
+                    color: statusColor(r.status), background: tintBg(statusColor(r.status), 0.14),
                   }}>
                     {r.status === "disponible" ? "Disponible"
                       : r.status === "en_attente" ? `En attente (${r.pendingBy})`
@@ -3968,8 +4053,8 @@ export default function App() {
                 )}
                 <div style={styles.modalRow}>
                   <span style={{
-                    color: r.status === "disponible" ? "#3BD07A" : r.status === "en_attente" ? "#FFB43A" : r.status === "en_cours" ? "#FFB43A" : r.status === "terminee" ? "#6E757E" : "#FFB43A",
-                    fontWeight: 600,
+                    ...styles.statusTag,
+                    color: statusColor(r.status), background: tintBg(statusColor(r.status), 0.14),
                   }}>
                     {r.status === "disponible" ? "Disponible"
                       : r.status === "en_attente" ? `En attente de confirmation (${r.pendingBy})`
@@ -5009,9 +5094,9 @@ const styles = {
   tabs: { display: "flex", gap: 8, padding: "16px 24px", alignItems: "center", flexWrap: "wrap" },
   tab: { background: "transparent", border: "1px solid #3A4048", color: "#8A9099", padding: "8px 14px", borderRadius: 20, cursor: "pointer", fontSize: 13 },
   tabActive: { background: "#FFB43A", color: "#1A1206", borderColor: "#FFB43A", fontWeight: 600 },
-  btnPrimary: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "10px 16px", borderRadius: 8, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 14 },
-  btnGhost: { background: "transparent", border: "1px solid #3A4048", color: "#F2F4F7", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
-  btnClaim: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "8px 14px", borderRadius: 8, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 13 },
+  btnPrimary: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "12px 18px", borderRadius: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", fontSize: 15, minHeight: 48 },
+  btnGhost: { background: "transparent", border: "1px solid #3A4048", color: "#F2F4F7", padding: "11px 16px", borderRadius: 10, cursor: "pointer", fontSize: 14.5, fontWeight: 600, minHeight: 46 },
+  btnClaim: { background: "#FFB43A", color: "#1A1206", border: "none", padding: "12px 20px", borderRadius: 12, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, minHeight: 52 },
   formCard: {
     margin: "0 24px 20px", background: "#1F1A12", border: "1px solid rgba(255,180,58,0.35)",
     borderRadius: 14, padding: 18, display: "flex", flexDirection: "column", gap: 14,
@@ -5113,7 +5198,7 @@ const styles = {
     fontSize: 15, fontWeight: 600, fontFamily: "'Manrope', sans-serif", padding: 0, flex: 1, minWidth: 0,
   },
   tpmrBadge: {
-    fontSize: 10, fontWeight: 700, color: "#1A1206", background: "#8A9099",
+    fontSize: 12, fontWeight: 700, color: "#1A1206", background: "#8A9099",
     padding: "2px 6px", borderRadius: 4, marginRight: 4,
   },
   suggestionBox: {
@@ -5160,11 +5245,11 @@ const styles = {
   emptyTitle: { color: "#F2F4F7", fontSize: 16, fontWeight: 600, margin: "0 0 8px" },
   emptySub: { color: "#6E757E", fontSize: 13, lineHeight: 1.5, margin: 0 },
   card: { background: "#191C21", borderRadius: 18, padding: "15px 16px", position: "relative", border: "1px solid #23272E" },
-  urgentBadge: { position: "absolute", top: -8, right: 12, background: "#E5484D", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center" },
+  urgentBadge: { position: "absolute", top: -8, right: 12, background: "#E5484D", color: "#fff", fontSize: 13, fontWeight: 700, padding: "3px 8px", borderRadius: 6, display: "flex", alignItems: "center" },
   cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  typeTag: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: 6, display: "flex", alignItems: "center", letterSpacing: "0.10em", textTransform: "uppercase" },
-  statusTag: { fontSize: 12, fontWeight: 600 },
-  metaRow: { display: "flex", gap: 14, fontSize: 12, color: "#8A9099", marginBottom: 8, flexWrap: "wrap" },
+  typeTag: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 700, padding: "4px 8px", borderRadius: 6, display: "flex", alignItems: "center", letterSpacing: "0.10em", textTransform: "uppercase" },
+  statusTag: { fontSize: 13.5, fontWeight: 800, padding: "5px 10px", borderRadius: 999, whiteSpace: "nowrap" },
+  metaRow: { display: "flex", gap: 14, fontSize: 14, color: "#A3AAB3", marginBottom: 8, flexWrap: "wrap" },
   metaItem: { display: "flex", alignItems: "center", gap: 4 },
   tarifTag: {
     display: "flex", alignItems: "center", fontSize: 20, fontWeight: 800,
@@ -5195,7 +5280,7 @@ const styles = {
   btnPrimaryAction: {
     display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%",
     background: "#FFB43A", color: "#1A1206", border: "none", borderRadius: 12,
-    padding: "14px 16px", fontSize: 15, fontWeight: 800, cursor: "pointer",
+    padding: "17px 18px", fontSize: 17, fontWeight: 800, cursor: "pointer", minHeight: 58,
   },
   btnSecondaryAction: {
     display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flex: 1,
@@ -5208,11 +5293,15 @@ const styles = {
     background: "#191C21", color: "#B8BEC6", border: "1px solid #23272E", borderRadius: 10,
     padding: "10px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer",
   },
-  notes: { fontSize: 12, color: "#B8BEC6", background: "#22262C", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
-  priorityBanner: { display: "flex", alignItems: "center", fontSize: 11, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 },
-  pendingBanner: { fontSize: 12, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "8px 10px", borderRadius: 6, marginBottom: 10 },
-  cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #2A2F36", paddingTop: 10 },
-  postedBy: { fontSize: 11, color: "#6E757E" },
+  notes: { fontSize: 14, color: "#C4CAD2", background: "#22262C", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
+  priorityBanner: { display: "flex", alignItems: "center", fontSize: 14, fontWeight: 600, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
+  pendingBanner: { fontSize: 14, fontWeight: 600, color: "#FFB43A", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
+  cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, borderTop: "1px solid #2A2F36", paddingTop: 12 },
+  postedBy: { fontSize: 13, color: "#8A9099" },
+  expressBox: {
+    marginTop: 26, padding: 16, borderRadius: 14,
+    background: "rgba(255,180,58,0.07)", border: "1px solid rgba(255,180,58,0.3)",
+  },
   hintBanner: { margin: "0 24px 16px", background: "#23272E", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#8A9099" },
   gainsCard: {
     padding: 18, borderRadius: 20, background: "#191C21", border: "1px solid #23272E",
