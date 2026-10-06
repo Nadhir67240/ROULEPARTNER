@@ -337,6 +337,7 @@ export default function App() {
   const debounceRef = useRef(null);
   const debounceRefArrivee = useRef(null);
   const photoInputRef = useRef(null);
+  const photoLibraryInputRef = useRef(null); // sans "capture" : ouvre la photothèque au lieu de l'appareil photo
   const documentInputRef = useRef(null);
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -2654,7 +2655,7 @@ export default function App() {
                   <div style={styles.sectionDivider} />
                   <div style={{ ...styles.sectionLabel, marginTop: 18 }}>Pièces jointes</div>
 
-                  <label style={{ ...styles.formLabel, marginTop: 10 }}>
+                  <div style={{ ...styles.formLabel, marginTop: 10 }}>
                     Photo du bon de transport (optionnel)
                     <input
                       ref={photoInputRef}
@@ -2664,10 +2665,22 @@ export default function App() {
                       onChange={handlePhotoChange}
                       style={{ display: "none" }}
                     />
-                    <button type="button" onClick={() => photoInputRef.current?.click()} style={styles.btnGhost}>
-                      {form.photo ? "Changer la photo" : "Choisir une photo"}
-                    </button>
-                  </label>
+                    <input
+                      ref={photoLibraryInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoChange}
+                      style={{ display: "none" }}
+                    />
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" onClick={() => photoInputRef.current?.click()} style={{ ...styles.btnGhost, flex: 1 }}>
+                        {form.photo ? "Reprendre une photo" : "Prendre une photo"}
+                      </button>
+                      <button type="button" onClick={() => photoLibraryInputRef.current?.click()} style={{ ...styles.btnGhost, flex: 1 }}>
+                        Photothèque
+                      </button>
+                    </div>
+                  </div>
                   {form.photo && (
                     <div style={{ position: "relative", display: "inline-block", marginTop: 8 }}>
                       <img src={form.photo} alt="Bon de transport" style={styles.photoPreview} />
