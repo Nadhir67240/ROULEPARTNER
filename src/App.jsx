@@ -1565,6 +1565,10 @@ export default function App() {
             Un email de confirmation a été envoyé à <strong>{user.email}</strong>. Clique sur le lien qu'il
             contient, puis reviens ici.
           </p>
+          <p style={styles.gateSub}>
+            <strong>Tu ne le trouves pas ?</strong> Regarde dans tes <strong>spams</strong> ou ton dossier
+            <strong> courrier indésirable</strong> : il y arrive souvent. Pense à le marquer comme « non spam ».
+          </p>
           {authError && <p style={{ color: "#E5484D", fontSize: 13 }}>{authError}</p>}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20 }}>
             <button
