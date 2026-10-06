@@ -802,7 +802,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Ferme l'alerte prioritaire quand la fenêtre de 15 s est écoulée, ou dès
+  // Ferme l'alerte prioritaire quand la fenêtre de 30 s est écoulée, ou dès
   // qu'un autre chauffeur a pris la course entre-temps.
   useEffect(() => {
     if (!priorityAlert) return;

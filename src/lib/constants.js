@@ -20,7 +20,7 @@ export function trajetLabel(id) {
 
 // Fenêtre de priorité : à la publication, seuls les chauffeurs les plus proches
 // peuvent prendre la course. Passé ce délai, elle s'ouvre à tout le monde.
-export const PRIORITY_WINDOW_MS = 15 * 1000;
+export const PRIORITY_WINDOW_MS = 30 * 1000;
 
 // Rayon autour de la prise en charge à l'intérieur duquel un chauffeur est prioritaire —
 // doit rester identique à PRIORITY_RADIUS_KM dans functions/index.js, qui fait foi pour

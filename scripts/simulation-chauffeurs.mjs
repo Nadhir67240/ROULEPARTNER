@@ -28,7 +28,7 @@ const FS_PORT = 8080;
 const OUT_FILE = process.argv[2] || "simulation-resultats.json";
 
 // --- Mêmes constantes que src/App.jsx / functions/index.js ---
-const PRIORITY_WINDOW_MS = 15 * 1000;
+const PRIORITY_WINDOW_MS = 30 * 1000;
 const PRIORITY_RADIUS_KM = 1.0;
 const PRIORITY_MAX_DRIVERS = 3;
 const POSITION_FRESH_MS = 15 * 60 * 1000;
@@ -336,7 +336,7 @@ class Driver {
 // Fonction serveur exécutée localement
 // ---------------------------------------------------------------------------
 // L'émulateur Functions exécute les déclencheurs UN PAR UN : comme notifyNewRide
-// attend 15 s (fenêtre de priorité), chaque course bloque la suivante et la
+// attend 30 s (fenêtre de priorité), chaque course bloque la suivante et la
 // priorité est écrite de plus en plus tard — ce qui n'arrive pas en production,
 // où Google lance plusieurs instances en parallèle. Avec SIM_FONCTION_LOCALE=1,
 // on lance l'émulateur SANS functions et on exécute ici le VRAI code de

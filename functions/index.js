@@ -14,7 +14,7 @@ setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
 const ADMIN_EMAIL = "taxi-vsl67@hotmail.com";
 
 // --- Ces valeurs doivent rester alignées avec celles de src/App.jsx ---
-const PRIORITY_WINDOW_MS = 15 * 1000;
+const PRIORITY_WINDOW_MS = 30 * 1000;
 const PRIORITY_RADIUS_KM = 1.0;
 const PRIORITY_MAX_DRIVERS = 3;
 
@@ -154,7 +154,8 @@ async function sendTo(entries, payload) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 exports.notifyNewRide = onDocumentCreated(
-  { document: "rides/{rideId}", timeoutSeconds: 60 },
+  // La fonction attend toute la fenêtre de priorité (30 s) avant de prévenir les autres : marge large.
+  { document: "rides/{rideId}", timeoutSeconds: 120 },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
