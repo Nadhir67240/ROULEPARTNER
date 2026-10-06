@@ -90,7 +90,18 @@ const fcmTokensCol = collection(db, "fcmTokens");
 
 // --- Authentification ---
 export function watchAuthState(callback) {
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(auth, async (user) => {
+    // Filet de sécurité : si le compte est confirmé mais que le jeton en cache dit
+    // encore le contraire, les règles Firestore refuseraient tout jusqu'au
+    // renouvellement automatique du jeton (1 h, voire plus si l'appli dort).
+    if (user?.emailVerified) {
+      try {
+        const { claims } = await user.getIdTokenResult();
+        if (claims.email_verified !== true) await user.getIdToken(true);
+      } catch {}
+    }
+    callback(user);
+  });
 }
 
 export async function signUp(email, password, displayName, licenseNumber, commune) {
@@ -149,6 +160,10 @@ export async function requestPasswordReset(email) {
 export async function reloadUser() {
   if (auth.currentUser) {
     await auth.currentUser.reload();
+    // reload() met à jour emailVerified côté appli, mais pas le jeton envoyé à
+    // Firestore : sans ce rafraîchissement forcé, les règles (isVerified) voient
+    // encore email_verified == false et bloquent position, courses, etc.
+    if (auth.currentUser.emailVerified) await auth.currentUser.getIdToken(true);
     return auth.currentUser;
   }
   return null;

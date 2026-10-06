@@ -765,6 +765,12 @@ export default function App() {
 
   const watchIdRef = useRef(null);
 
+  // [0] : refus des règles Firestore (compte pas encore reconnu, ou banni) ; [1] : autre échec.
+  const POSITION_SHARE_ERRORS = [
+    "Ta position n'a pas pu être partagée : ton compte n'est pas encore reconnu. Ferme complètement l'appli puis rouvre-la. Si ça continue, contacte l'administrateur.",
+    "Ta position n'a pas pu être partagée pour le moment. Vérifie ta connexion internet, l'appli réessaie toute seule dès que tu bouges.",
+  ];
+
   const sharePosition = () => {
     // Si le suivi est déjà actif, ce clic l'arrête (et retire le point de la carte).
     if (watchIdRef.current != null) {
@@ -791,8 +797,10 @@ export default function App() {
         localStorage.setItem("rp-sharing-enabled", "1");
         try {
           await setDriverPosition(driverName, coords);
+          // Le partage refonctionne : on retire l'éventuel message d'échec affiché plus tôt.
+          setError((prev) => (POSITION_SHARE_ERRORS.includes(prev) ? "" : prev));
         } catch (e) {
-          setError("Position récupérée mais non partagée (vérifie ta config Firebase).");
+          setError(e?.code === "permission-denied" ? POSITION_SHARE_ERRORS[0] : POSITION_SHARE_ERRORS[1]);
         }
       },
       () => setMyPosStatus("denied"),
