@@ -265,6 +265,7 @@ export const styles = {
   },
   notes: { fontSize: 14, color: "var(--text-tertiary)", background: "var(--surface-tile)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
   priorityBanner: { display: "flex", alignItems: "center", fontSize: 14, fontWeight: 600, color: "var(--accent-text)", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
+  modifBanner: { fontSize: 14, fontWeight: 700, color: "var(--text-primary)", background: "rgba(255,140,0,0.16)", border: "2px solid #FF8C00", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
   pendingBanner: { fontSize: 14, fontWeight: 600, color: "var(--accent-text)", background: "rgba(255,180,58,0.1)", border: "1px solid rgba(255,180,58,0.3)", padding: "10px 12px", borderRadius: 8, marginBottom: 10 },
   cardFooter: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, borderTop: "1px solid var(--border-strong)", paddingTop: 12 },
   postedBy: { fontSize: 13, color: "var(--text-muted)" },

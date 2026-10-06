@@ -148,6 +148,21 @@ export function notifyStatusChange(ride, newStatus) {
   }
 }
 
+// Le posteur a corrigé une course que j'ai prise (ou demandée) : adresse, heure, tarif...
+export function notifyRideModified(ride) {
+  playAlertSound(true);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification("⚠️ Course modifiée par " + ride.postedBy, {
+      body: `${ride.depart} → ${ride.arrivee} — ouvre la course pour voir ce qui a changé`,
+      icon: "/icon-192.png",
+      tag: `${ride.id}-modif-${ride.modifiedAfterAccept?.at || ""}`,
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
 export function notifyNewMessage(senderName, text) {
   playAlertSound(false);
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;

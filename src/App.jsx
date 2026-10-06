@@ -21,12 +21,40 @@ import {
 import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
 import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
 import { formatPostedAt, dateKey, todayKey, timePlusMinutes, formatRideDate, FRENCH_MONTHS, formatDayMonth, FRENCH_WEEKDAYS_SHORT, keyFromDate, dateFromKey, addDaysKey, startOfWeekKey, rideTimingBadge, thisWeekRange } from "./lib/dates";
-import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyNewMessage } from "./lib/alerts";
+import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyRideModified, notifyNewMessage } from "./lib/alerts";
 import { loadRideDraft, saveRideDraft, clearRideDraft, loadRecentAddresses, saveRecentAddress } from "./lib/storage";
 import { computePriorityDrivers, distanceKm, fetchRoadDistanceKm, ridePickupCoords, wazeUrl, googleMapsUrl, cardLocality, shortAddress, isMedicalPoi, fetchBanSuggestions, interleaveResults, rankAddressResults, suggestionDistanceLabel } from "./lib/geo";
 import { compressPhoto, openPdfDocument } from "./lib/files";
 import { AuthSplash, AuthBackdrop, AuthVehicleStrip } from "./components/AuthScreens";
 import { styles } from "./styles";
+
+// Ce qui a changé entre la course acceptée et la version corrigée par le posteur, formulé
+// pour le chauffeur qui l'a prise (bandeau "Course modifiée après acceptation").
+const TAKER_WATCHED_FIELDS = [
+  ["depart", "Départ"],
+  ["arrivee", "Arrivée"],
+  ["date", "Date", (v) => (v ? formatRideDate(v) : "")],
+  ["heure", "Heure"],
+  ["heureRetour", "Heure retour"],
+  ["trajet", "Trajet", (v) => (v ? trajetLabel(v) : "")],
+  ["type", "Type", (v) => (v ? typeMeta(v).label : "")],
+  ["tarif", "Tarif", (v) => (v ? `${v} €` : "")],
+  ["tpmr", "TPMR", (v) => (v ? "oui" : "non")],
+  ["patient", "Patient"],
+  ["patientTel", "Téléphone patient"],
+  ["notes", "Notes"],
+];
+function rideChangesForTaker(before, after) {
+  const changes = [];
+  for (const [field, label, fmt = (v) => v ?? ""] of TAKER_WATCHED_FIELDS) {
+    const from = String(fmt(before[field]) || "");
+    const to = String(fmt(after[field]) || "");
+    if (from !== to) changes.push({ field, label, from, to });
+  }
+  if ((before.photo || null) !== (after.photo || null)) changes.push({ field: "photo", label: "Photo du bon", from: "", to: after.photo ? "modifiée" : "retirée" });
+  if ((before.document || null) !== (after.document || null)) changes.push({ field: "document", label: "PDF du bon", from: "", to: after.document ? "modifié" : "retiré" });
+  return changes;
+}
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -315,6 +343,45 @@ export default function App() {
   const mapMarkersRef = useRef({});
   const mapMarkerStatusRef = useRef({}); // name -> "busy"/"free" déjà affiché, pour éviter de recréer l'icône inutilement
   const [editingId, setEditingId] = useState(null);
+  // Course telle qu'elle était à l'ouverture de "Modifier" : sert à repérer ce qui a changé
+  // quand le posteur corrige une course déjà acceptée, pour prévenir le chauffeur.
+  const editOriginalRideRef = useRef(null);
+  // Bandeaux "course modifiée" déjà vus par ce chauffeur : { [rideId]: modifiedAfterAccept.at }.
+  const [seenModifs, setSeenModifs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("rp-seen-modifs") || "{}"); } catch { return {}; }
+  });
+  const markModifSeen = (r) => {
+    const next = { ...seenModifs, [r.id]: r.modifiedAfterAccept?.at };
+    setSeenModifs(next);
+    try { localStorage.setItem("rp-seen-modifs", JSON.stringify(next)); } catch {}
+  };
+  // Bandeau pour le chauffeur qui a pris (ou demandé) une course corrigée ensuite par le posteur.
+  const renderModifBanner = (r, { compact = false } = {}) => {
+    const modif = r.modifiedAfterAccept;
+    if (!modif?.changes?.length || r.postedBy === driverName) return null;
+    if (r.takenBy !== driverName && r.pendingBy !== driverName) return null;
+    if (modif.forDriver !== driverName || seenModifs[r.id] === modif.at) return null;
+    if (compact) {
+      return (
+        <div style={styles.modifBanner}>
+          ⚠️ Course modifiée par {r.postedBy} : ouvre-la pour voir ce qui a changé
+        </div>
+      );
+    }
+    return (
+      <div style={styles.modifBanner}>
+        <div style={{ marginBottom: 6 }}>⚠️ Course modifiée après acceptation par {r.postedBy}</div>
+        {modif.changes.map((c) => (
+          <div key={c.field} style={{ fontWeight: 500, fontSize: 13.5, marginTop: 3 }}>
+            <strong>{c.label}</strong> : {c.from ? <><s>{c.from}</s> → </> : null}{c.to || "(vide)"}
+          </div>
+        ))}
+        <button type="button" onClick={() => markModifSeen(r)} style={{ ...styles.btnUtilityAction, marginTop: 10 }}>
+          <Check size={14} /> J'ai vu
+        </button>
+      </div>
+    );
+  };
 
   // Sauvegarde du brouillon à chaque modification tant que le formulaire de NOUVELLE
   // course est ouvert ; effacé dès qu'il se ferme (publié ou annulé). Les modifications
@@ -598,9 +665,15 @@ export default function App() {
               setReleaseAlert({ ride: r, takenByName: prevInfo.takenBy });
             }
           }
+          const modifAt = r.modifiedAfterAccept?.at || null;
+          if (!isNew && modifAt && modifAt !== prevInfo?.modifAt && r.postedBy !== driverName
+            && r.modifiedAfterAccept.forDriver === driverName) {
+            notifyRideModified(r);
+            vibrate("claim");
+          }
         });
       }
-      knownRideIds.current = new Map(newRides.map((r) => [r.id, { status: r.status, takenBy: r.takenBy }]));
+      knownRideIds.current = new Map(newRides.map((r) => [r.id, { status: r.status, takenBy: r.takenBy, modifAt: r.modifiedAfterAccept?.at || null }]));
       firstLoad.current = false;
       setRides(newRides);
     });
@@ -869,7 +942,28 @@ export default function App() {
     const myPos = positions[driverName] || null;
     try {
       if (editingId) {
-        await updateRide(editingId, { ...form });
+        // Version la plus récente de la course : elle a pu être acceptée pendant la saisie.
+        const original = rides.find((r) => r.id === editingId) || myRides.find((r) => r.id === editingId) || editOriginalRideRef.current;
+        const patch = { ...form };
+        if (original && original.status !== "disponible") {
+          const changes = rideChangesForTaker(original, form);
+          if (changes.length) {
+            // On cumule avec les corrections précédentes : le bandeau montre tout ce qui a changé
+            // depuis l'acceptation, en gardant pour chaque champ la valeur d'origine.
+            const sameDriver = original.modifiedAfterAccept?.forDriver === (original.takenBy || original.pendingBy || null);
+            const previous = sameDriver ? original.modifiedAfterAccept?.changes || [] : [];
+            const merged = previous.filter((c) => !changes.some((n) => n.field === c.field));
+            for (const c of changes) {
+              const prev = previous.find((p) => p.field === c.field);
+              const from = prev ? prev.from : c.from;
+              if (from !== c.to || c.field === "photo" || c.field === "document") merged.push({ ...c, from });
+            }
+            // "forDriver" : si la course est relâchée puis reprise par un autre, il ne verra pas ce bandeau.
+            const forDriver = original.takenBy || original.pendingBy || null;
+            patch.modifiedAfterAccept = merged.length ? { at: Date.now(), forDriver, changes: merged } : null;
+          }
+        }
+        await updateRide(editingId, patch);
       } else {
         const newRide = {
           id: uid(),
@@ -1049,6 +1143,7 @@ export default function App() {
   };
 
   const startEdit = (r) => {
+    editOriginalRideRef.current = r;
     editOriginalTarifInputs.current = {
       departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
       departCity: r.departCity || "", departDept: r.departDept || "", arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
@@ -2619,6 +2714,11 @@ export default function App() {
                 <>
                   <h2 style={styles.wizardTitle}>Résumé et confirmation</h2>
                   <p style={styles.wizardSubtitle}>Vérifie les informations avant de publier.</p>
+                  {editingId && editOriginalRideRef.current && editOriginalRideRef.current.status !== "disponible" && (
+                    <div style={styles.pendingBanner}>
+                      Cette course est déjà acceptée : le chauffeur sera prévenu de tes modifications et pourra la relâcher si elles ne lui conviennent pas.
+                    </div>
+                  )}
 
                   <div style={styles.wizardSummaryCard}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -2893,6 +2993,7 @@ export default function App() {
                   </div>
                 )}
 
+                {renderModifBanner(r, { compact: true })}
                 {r.status === "en_attente" && mine && (
                   <div style={styles.pendingBanner}>
                     <strong>{r.pendingBy}</strong> veut prendre cette course — confirmation automatique dans{" "}
@@ -3172,6 +3273,7 @@ export default function App() {
                 </div>
               )}
 
+              {renderModifBanner(r)}
               {r.status === "en_attente" && mine && (
                 <div style={styles.pendingBanner}>
                   <strong>{r.pendingBy}</strong> veut prendre cette course — confirmation automatique dans{" "}
@@ -3227,7 +3329,7 @@ export default function App() {
                   <button onClick={() => duplicateRide(r)} style={styles.btnUtilityAction}>
                     <Copy size={14} /> Dupliquer
                   </button>
-                  {mine && r.status === "disponible" && (
+                  {mine && ["disponible", "en_attente", "prise", "en_cours"].includes(r.status) && (
                     <button onClick={() => startEdit(r)} style={styles.btnUtilityAction}>
                       <Pencil size={14} /> Modifier
                     </button>
