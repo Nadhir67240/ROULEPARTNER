@@ -28,6 +28,11 @@ import { compressPhoto, openPdfDocument } from "./lib/files";
 import { AuthSplash, AuthBackdrop, AuthVehicleStrip } from "./components/AuthScreens";
 import { styles } from "./styles";
 
+// "Mes courses" : couleurs choisies hors de la palette des types de course
+// (orange taxi, bleu payante, vert VSL, rouge ambulance) pour ne pas les confondre.
+const MY_TAKEN_COLOR = "#22B8CF";  // course prise à un autre chauffeur
+const MY_POSTED_COLOR = "#B07CF2"; // course donnée (postée par moi)
+
 // Ce qui a changé entre la course acceptée et la version corrigée par le posteur, formulé
 // pour le chauffeur qui l'a prise (bandeau "Course modifiée après acceptation").
 const TAKER_WATCHED_FIELDS = [
@@ -1714,20 +1719,33 @@ export default function App() {
   const activeViewTab = viewTabs.find((t) => t.id === filter);
   const hasActiveFilters = !!dateFilter || radiusFilter !== "all" || !!activeViewTab;
 
+  // Couleur propre à chaque sens dans "Mes courses" : une course prise (à un autre
+  // chauffeur) et une course donnée (postée par moi) doivent se distinguer d'un coup d'œil.
+  const myRideRole = (r) => r.takenBy === driverName
+    ? { label: "Prise", color: MY_TAKEN_COLOR, icon: Car }
+    : { label: "Donnée", color: MY_POSTED_COLOR, icon: Send };
+
   // Carte compacte utilisée dans la page "Mes courses" (prises ET données) — ouvre la fiche
   // détaillée existante au clic plutôt que de dupliquer toutes ses actions ici.
   const renderMyCourseCard = (r) => {
     const meta = typeMeta(r.type);
+    const role = myRideRole(r);
     return (
       <div
         key={r.id}
-        style={{ ...styles.card, cursor: "pointer" }}
+        style={{ ...styles.card, cursor: "pointer", borderLeft: `4px solid ${role.color}` }}
         onClick={() => { setSelectedRide(r); setShowMyCoursesPanel(false); }}
       >
         <div style={styles.cardHeader}>
-          <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
-            <meta.icon size={12} style={{ marginRight: 4 }} />
-            {meta.label}
+          <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ ...styles.typeTag, background: tintBg(role.color, 0.16), color: role.color }}>
+              <role.icon size={12} style={{ marginRight: 4 }} />
+              {role.label}
+            </span>
+            <span style={{ ...styles.typeTag, background: tintBg(meta.color, 0.12), color: meta.color }}>
+              <meta.icon size={12} style={{ marginRight: 4 }} />
+              {meta.label}
+            </span>
           </span>
           <span
             style={{
@@ -1799,14 +1817,14 @@ export default function App() {
 
   const renderCalRideRow = (r) => {
     const meta = typeMeta(r.type);
-    const isTaken = r.takenBy === driverName;
+    const role = myRideRole(r);
     return (
       <div
         key={r.id}
         onClick={() => { setSelectedRide(r); setShowMyCoursesPanel(false); }}
         style={{
           display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-          background: "var(--bg-screen)", border: "1px solid var(--border-subtle)", borderLeft: `3px solid ${meta.color}`,
+          background: "var(--bg-screen)", border: "1px solid var(--border-subtle)", borderLeft: `4px solid ${role.color}`,
           borderRadius: 10, padding: "10px 12px",
         }}
       >
@@ -1816,7 +1834,7 @@ export default function App() {
             {cardLocality(r.depart)} → {cardLocality(r.arrivee)}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-            {meta.label} · {isTaken ? "Prise" : "Donnée"}
+            <span style={{ color: role.color, fontWeight: 700 }}>{role.label}</span> · {meta.label}
             {r.status === "terminee" ? " · Terminée" : r.status === "en_cours" ? " · En cours" : r.status === "en_attente" ? " · En attente" : ""}
           </div>
         </div>
@@ -4057,7 +4075,7 @@ export default function App() {
             </div>
 
             {myCoursesView === "calendrier" ? renderMyCoursesCalendar() : (<>
-            <div style={styles.myCoursesSectionTitle}>
+            <div style={{ ...styles.myCoursesSectionTitle, color: MY_TAKEN_COLOR }}>
               <Car size={13} /> Courses prises ({myTakenRides.length})
             </div>
             {myTakenRides.length === 0 ? (
@@ -4070,7 +4088,7 @@ export default function App() {
               </div>
             )}
 
-            <div style={styles.myCoursesSectionTitle}>
+            <div style={{ ...styles.myCoursesSectionTitle, color: MY_POSTED_COLOR }}>
               <Send size={13} /> Courses données ({myPostedRides.length})
             </div>
             {myPostedRides.length === 0 ? (
