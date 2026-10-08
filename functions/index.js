@@ -122,7 +122,9 @@ async function sendTo(entries, payload) {
       headers: { Urgency: "high" },
       notification: {
         icon: "/icon-192.png",
-        badge: "/icon-192.png",
+        // Android n'affiche que la transparence du badge (barre d'état) : il faut un
+        // dessin blanc sur fond transparent, sinon on obtient un carré blanc.
+        badge: "/badge-96.png",
         requireInteraction: payload.requireInteraction === true,
         tag: payload.data.rideId,
       },

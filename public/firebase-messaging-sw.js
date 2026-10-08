@@ -29,7 +29,9 @@ messaging.onBackgroundMessage((payload) => {
   self.registration.showNotification(n.title || "RoulePartner", {
     body: n.body || "",
     icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    // Android n'affiche que la transparence du badge (barre d'état) : il faut un
+    // dessin blanc sur fond transparent, sinon on obtient un carré blanc.
+    badge: "/badge-96.png",
     tag: d.rideId || "roulepartner",
     // Une course prioritaire reste affichée tant que le chauffeur ne l'a pas vue :
     // il n'a que quelques secondes pour se décider.
