@@ -3150,15 +3150,17 @@ export default function App() {
                   <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--text-faint)", flexShrink: 0 }} />
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 20, flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15.5, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.depart}</span>
+                  {/* Adresse complète sur plusieurs lignes si besoin : le chauffeur doit pouvoir
+                      la lire en entier, les boutons Waze/Maps restent alignés sur la 1re ligne. */}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 15.5, lineHeight: 1.35, color: "var(--text-primary)", overflowWrap: "anywhere", minWidth: 0, paddingTop: 6 }}>{r.depart}</span>
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                       <a href={wazeUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#05C8F7" }} aria-label="Waze vers le départ" title="Waze">W</a>
                       <a href={googleMapsUrl(r.departLat, r.departLng, r.depart)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#4285F4" }} aria-label="Maps vers le départ" title="Maps">M</a>
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <span style={{ fontWeight: 600, fontSize: 15.5, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.arrivee}</span>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontWeight: 600, fontSize: 15.5, lineHeight: 1.35, color: "var(--text-tertiary)", overflowWrap: "anywhere", minWidth: 0, paddingTop: 6 }}>{r.arrivee}</span>
                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                       <a href={wazeUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#05C8F7" }} aria-label="Waze vers l'arrivée" title="Waze">W</a>
                       <a href={googleMapsUrl(r.arriveeLat, r.arriveeLng, r.arrivee)} target="_blank" rel="noopener noreferrer" style={{ ...styles.navIconBtn, background: "#4285F4" }} aria-label="Maps vers l'arrivée" title="Maps">M</a>
