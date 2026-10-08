@@ -116,6 +116,14 @@ service cloud.firestore {
     match /profiles/{driverId} {
       allow read: if isVerified();
       allow write: if isAdmin() || (isMe(driverId) && !isBanned());
+      // Inscription : le compte n'a pas encore confirmé son email, mais doit pouvoir
+      // créer SA fiche (sinon email/licence/commune ne sont jamais enregistrés).
+      // Création seulement (pas d'écrasement d'une fiche existante), jamais bannie d'office.
+      allow create: if request.auth != null
+        && request.auth.token.name == driverId
+        && request.resource.data.keys().hasOnly(['email', 'licenseNumber', 'commune', 'banned', 'createdAt'])
+        && request.resource.data.banned == false
+        && request.resource.data.email == request.auth.token.email;
     }
 
     match /messages/{messageId} {

@@ -17,7 +17,7 @@ async function reset() {
   await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${PROJECT_ID}/accounts`, { method: "DELETE" });
 }
 
-async function makeUser(name) {
+async function makeUser(name, { verified = true } = {}) {
   const app = initializeApp({ apiKey: "demo-key", projectId: PROJECT_ID }, name);
   const auth = getAuth(app);
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
@@ -25,12 +25,12 @@ async function makeUser(name) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   const cred = await createUserWithEmailAndPassword(auth, `${name.replace(/\s/g, "")}@test.fr`, "motdepasse123");
   await updateProfile(cred.user, { displayName: name });
-  await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:update`, {
+  if (verified) await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:update`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
     body: JSON.stringify({ localId: cred.user.uid, emailVerified: true }),
   });
   await cred.user.getIdToken(true);
-  return { name, db };
+  return { name, db, email: cred.user.email };
 }
 
 // Écrit directement en contournant les règles (préparation des cas de test).
@@ -125,6 +125,20 @@ await expect("autre chauffeur démarre une course qui n'est pas à lui", false, 
   updateDoc(doc(other.db, "rides/c8"), { status: "en_cours", startedAt: Date.now() }));
 await expect("posteur modifie sa course (tarif)", true, () =>
   updateDoc(doc(poster.db, "rides/c8"), { tarif: "45" }));
+
+// --- Fiche profil à l'inscription (email pas encore confirmé) ---
+const nouveau = await makeUser("Nouveau", { verified: false });
+const fiche = (over) => ({ email: nouveau.email, licenseNumber: "LIC1", commune: "Strasbourg", banned: false, createdAt: Date.now(), ...over });
+await expect("inscrit non confirmé crée la fiche d'un autre nom", false, () =>
+  setDoc(doc(nouveau.db, "profiles/Autre2"), fiche()));
+await expect("inscrit non confirmé crée sa fiche avec banned: true", false, () =>
+  setDoc(doc(nouveau.db, "profiles/Nouveau"), fiche({ banned: true })));
+await expect("inscrit non confirmé ajoute un champ non prévu", false, () =>
+  setDoc(doc(nouveau.db, "profiles/Nouveau"), fiche({ phone: "0600000000" })));
+await expect("inscrit non confirmé crée sa fiche", true, () =>
+  setDoc(doc(nouveau.db, "profiles/Nouveau"), fiche()));
+await expect("inscrit non confirmé écrase ensuite sa fiche", false, () =>
+  setDoc(doc(nouveau.db, "profiles/Nouveau"), fiche({ commune: "Paris" })));
 
 console.log(`\n${pass} OK, ${fail} KO`);
 process.exit(fail ? 1 : 0);

@@ -61,6 +61,8 @@ export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 });
 export const auth = getAuth(app);
+// Mails Firebase (confirmation, mot de passe oublié) envoyés en français.
+auth.languageCode = "fr";
 if (USE_EMULATORS) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
@@ -127,15 +129,23 @@ export async function signUp(email, password, displayName, licenseNumber, commun
     throw new Error("license_taken");
   }
 
-  await setDoc(doc(profilesCol, displayName), {
-    email,
-    licenseNumber: normalizedLicense,
-    commune,
-    banned: false,
-    createdAt: Date.now(),
-  }, { merge: true });
-
+  // Le mail de confirmation part AVANT l'écriture de la fiche : si celle-ci échoue,
+  // le chauffeur a quand même son lien, sans devoir cliquer sur « Renvoyer l'email ».
   await sendEmailVerification(cred.user);
+
+  try {
+    await setDoc(doc(profilesCol, displayName), {
+      email: cred.user.email, // forme normalisée par Firebase, comparée au jeton par les règles
+      licenseNumber: normalizedLicense,
+      commune,
+      banned: false,
+      createdAt: Date.now(),
+    });
+  } catch (e) {
+    // Le compte existe déjà et le mail est parti : ne pas afficher « Échec de
+    // l'inscription » pour autant. L'admin peut compléter la fiche ensuite.
+    console.error("signUp: écriture du profil refusée", e);
+  }
   return cred.user;
 }
 
