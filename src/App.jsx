@@ -217,8 +217,21 @@ export default function App() {
   useEffect(() => {
     const PULL_THRESHOLD = 70;
 
+    // Le "tirer pour rafraîchir" ne vaut que pour la page principale : si le doigt part
+    // d'une fenêtre ouverte (modale, chat, fiche course, formulaire… tous en position
+    // fixe) ou d'une zone qui défile elle-même, un glissement vers le bas ne doit pas
+    // recharger l'appli — sinon on perd l'écran en cours et on revient à l'accueil.
+    const startsInOverlayOrScroller = (target) => {
+      for (let el = target; el && el !== document.body; el = el.parentElement) {
+        const cs = window.getComputedStyle(el);
+        if (cs.position === "fixed") return true;
+        if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && el.scrollHeight > el.clientHeight) return true;
+      }
+      return false;
+    };
+
     const onTouchStart = (e) => {
-      if (window.scrollY <= 0) {
+      if (window.scrollY <= 0 && !startsInOverlayOrScroller(e.target)) {
         pullStartY.current = e.touches[0].clientY;
       } else {
         pullStartY.current = null;
