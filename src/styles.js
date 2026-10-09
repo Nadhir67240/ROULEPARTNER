@@ -116,6 +116,64 @@ export const styles = {
     padding: "16px 16px", borderBottom: "1px solid var(--border-subtle)", flexShrink: 0,
   },
   fullPageTitle: { fontSize: 17.5, fontWeight: 800, margin: 0, fontFamily: "'Manrope', sans-serif", flex: 1, textAlign: "center" },
+  // --- Messagerie ---
+  chatHeader: {
+    display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
+    padding: "calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px 6px",
+    borderBottom: "1px solid var(--border-subtle)", background: "var(--bg-bar, var(--bg-screen))",
+  },
+  chatHeaderBtn: {
+    width: 40, height: 40, borderRadius: 12, border: "none", background: "transparent",
+    color: "var(--text-primary)", display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: "pointer", flexShrink: 0, textDecoration: "none",
+  },
+  chatAvatar: {
+    width: 46, height: 46, borderRadius: "50%", flexShrink: 0,
+    background: "rgba(255,180,58,0.16)", color: "var(--accent-text)", border: "1px solid rgba(255,180,58,0.35)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontWeight: 800, fontSize: 15, letterSpacing: "0.02em",
+  },
+  chatListRow: {
+    display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left",
+    padding: "12px 16px", background: "transparent", border: "none",
+    borderBottom: "1px solid var(--border-subtle)", cursor: "pointer", color: "inherit", font: "inherit",
+  },
+  chatEmptyIcon: {
+    width: 56, height: 56, borderRadius: "50%", margin: "0 auto 14px",
+    background: "rgba(255,180,58,0.12)", color: "var(--accent-text)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  chatScroll: {
+    flex: 1, minHeight: 0, overflowY: "auto", overscrollBehaviorY: "contain",
+    display: "flex", flexDirection: "column", padding: "8px 12px 14px",
+  },
+  chatDaySep: { display: "flex", justifyContent: "center", margin: "16px 0 4px" },
+  chatDayPill: {
+    fontSize: 11.5, fontWeight: 700, color: "var(--text-muted)", background: "var(--surface-card)",
+    border: "1px solid var(--border-subtle)", borderRadius: 999, padding: "4px 12px", textTransform: "capitalize",
+  },
+  chatComposer: {
+    flexShrink: 0, borderTop: "1px solid var(--border-subtle)", background: "var(--bg-bar, var(--bg-screen))",
+    padding: "8px 0 calc(env(safe-area-inset-bottom, 0px) + 10px)",
+  },
+  chatQuickRow: {
+    display: "flex", gap: 8, overflowX: "auto", padding: "0 12px 8px", scrollbarWidth: "none",
+  },
+  chatQuickChip: {
+    flexShrink: 0, whiteSpace: "nowrap", fontSize: 13, fontWeight: 700, cursor: "pointer",
+    padding: "7px 13px", borderRadius: 999, background: "transparent",
+    border: "1px solid rgba(255,180,58,0.45)", color: "var(--accent-text)",
+  },
+  chatInput: {
+    flex: 1, minWidth: 0, resize: "none", outline: "none", border: "1px solid var(--border-subtle)",
+    background: "var(--surface-tile)", color: "var(--text-primary)", borderRadius: 22,
+    padding: "11px 16px", fontSize: 16, lineHeight: 1.35, fontFamily: "inherit",
+    maxHeight: 120, minHeight: 44, display: "block",
+  },
+  chatSendBtn: {
+    width: 44, height: 44, borderRadius: "50%", border: "none", flexShrink: 0,
+    display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s",
+  },
   myCoursesSectionTitle: {
     display: "flex", alignItems: "center", gap: 8, fontFamily: "'IBM Plex Mono', monospace",
     fontSize: 11.5, fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.10em",

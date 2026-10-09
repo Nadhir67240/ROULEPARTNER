@@ -61,6 +61,34 @@ function rideChangesForTaker(before, after) {
   return changes;
 }
 
+// --- Messagerie : petites aides d'affichage ---
+const CHAT_QUICK_REPLIES = ["J'arrive", "Je suis sur place", "Bien reçu 👍", "Petit retard, j'arrive", "Je te rappelle"];
+// Deux messages du même chauffeur à moins de 5 min d'écart forment un seul bloc.
+const CHAT_GROUP_GAP_MS = 5 * 60 * 1000;
+function chatInitials(name) {
+  const parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || "?") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+function chatTime(ts) {
+  return ts ? new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
+}
+function chatDayLabel(ts) {
+  const d = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Aujourd'hui";
+  if (d.toDateString() === yesterday.toDateString()) return "Hier";
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+}
+// Heure pour la liste des conversations : l'heure si c'est aujourd'hui, sinon la date courte.
+function chatListTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (d.toDateString() === new Date().toDateString()) return chatTime(ts);
+  const label = chatDayLabel(ts);
+  return label === "Hier" ? "Hier" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -98,7 +126,8 @@ export default function App() {
   });
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
-  const chatEndRef = useRef(null);
+  const chatScrollRef = useRef(null);
+  const chatInputRef = useRef(null);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
   const [showMyCoursesPanel, setShowMyCoursesPanel] = useState(false);
   // Thème : "auto" (suit le téléphone), "light" ou "dark". main.jsx l'applique déjà au
@@ -159,16 +188,46 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatMessages, chatRideId]);
 
+  // On fait défiler la zone des messages elle-même (et pas la page) : scrollIntoView
+  // décalait toute la fenêtre sur mobile et faisait déborder la discussion en bas.
   useEffect(() => {
-    if (chatRideId) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = chatScrollRef.current;
+    if (chatRideId && el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [chatMessages, chatRideId]);
 
-  const handleSendMessage = async () => {
-    if (!chatInput.trim() || !chatRideId) return;
+  // Hauteur réellement visible (sans le clavier) : la discussion s'y cale pour que la
+  // zone de saisie reste toujours au-dessus du clavier et de la barre de navigation.
+  const [chatViewport, setChatViewport] = useState(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!chatRideId || !vv) return;
+    const update = () => setChatViewport({ height: vv.height, top: vv.offsetTop });
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      setChatViewport(null);
+    };
+  }, [chatRideId]);
+
+  // La zone de saisie grandit avec le texte (jusqu'à ~5 lignes).
+  useEffect(() => {
+    const el = chatInputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [chatInput, chatRideId]);
+
+  const handleSendMessage = async (preset) => {
+    const text = (typeof preset === "string" ? preset : chatInput).trim();
+    if (!text || !chatRideId) return;
+    if (typeof preset !== "string") setChatInput("");
     try {
-      await sendMessage(chatRideId, driverName, chatInput.trim());
-      setChatInput("");
+      await sendMessage(chatRideId, driverName, text);
     } catch (e) {
+      if (typeof preset !== "string") setChatInput(text);
       setError("Échec de l'envoi du message.");
     }
   };
@@ -4122,114 +4181,195 @@ export default function App() {
 
       {showMessagesPanel && (
         <div style={styles.wizardOverlay}>
-          <div style={styles.fullPageHeader}>
+          <div style={{ ...styles.fullPageHeader, paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)" }}>
             <span style={{ width: 38 }} />
-            <h2 style={{ ...styles.fullPageTitle, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><MessageCircle size={18} /> Messages</h2>
+            <h2 style={{ ...styles.fullPageTitle, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <MessageCircle size={18} /> Messages
+              {totalUnreadMessages > 0 && (
+                <span style={{ ...styles.navBadge, position: "static", fontSize: 11, height: 18, minWidth: 18, borderRadius: 9 }}>
+                  {totalUnreadMessages > 9 ? "9+" : totalUnreadMessages}
+                </span>
+              )}
+            </h2>
             <button onClick={() => setShowMessagesPanel(false)} style={styles.wizardNavBtn} aria-label="Fermer">
               <X size={20} />
             </button>
           </div>
-          <div style={styles.wizardBody}>
+          <div style={{ ...styles.wizardBody, padding: "8px 0 calc(env(safe-area-inset-bottom, 0px) + 20px)" }}>
             {conversations.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontSize: 14, textAlign: "center", padding: "20px 0" }}>
-                Aucune conversation pour l'instant. Elles apparaissent ici dès qu'une course que tu as postée ou prise a un message.
-              </p>
+              <div style={{ textAlign: "center", padding: "56px 32px", color: "var(--text-muted)" }}>
+                <div style={styles.chatEmptyIcon}><MessageCircle size={26} /></div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "var(--text-primary)", marginBottom: 6 }}>Aucune conversation</div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+                  Elles apparaissent ici dès qu'une course que tu as postée ou prise a un message.
+                </div>
+              </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {conversations.map((c) => (
+              conversations.map((c) => {
+                const unread = c.unread > 0;
+                return (
                   <button
                     key={c.rideId}
                     onClick={() => { setChatRideId(c.rideId); setShowMessagesPanel(false); }}
-                    style={{
-                      display: "flex", justifyContent: "space-between", alignItems: "center",
-                      background: "var(--bg-screen)", border: "1px solid var(--border-subtle)", borderRadius: 10,
-                      padding: "12px 14px", textAlign: "left", cursor: "pointer",
-                    }}
+                    style={styles.chatListRow}
                   >
-                    <div style={{ overflow: "hidden" }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>
-                        {c.otherParty || "?"}
-                        {c.ride && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> — {c.ride.depart} → {c.ride.arrivee}</span>}
+                    <div style={styles.chatAvatar}>{chatInitials(c.otherParty)}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: 15, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {c.otherParty || "?"}
+                        </span>
+                        <span className="rp-meter" style={{ fontSize: 11.5, flexShrink: 0, color: unread ? "var(--accent-text)" : "var(--text-faint)", fontWeight: unread ? 800 : 600 }}>
+                          {chatListTime(c.last.createdAt)}
+                        </span>
                       </div>
-                      <div style={{
-                        color: "var(--text-muted)", fontSize: 13, whiteSpace: "nowrap",
-                        overflow: "hidden", textOverflow: "ellipsis", maxWidth: 260,
-                      }}>
-                        {c.last.senderName === driverName ? "Toi : " : ""}{c.last.text}
+                      {c.ride && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden" }}>
+                          <MapPin size={11} style={{ flexShrink: 0 }} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.ride.depart} → {c.ride.arrivee}</span>
+                        </div>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                        <span style={{
+                          flex: 1, minWidth: 0, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          color: unread ? "var(--text-primary)" : "var(--text-muted)", fontWeight: unread ? 700 : 500,
+                        }}>
+                          {c.last.senderName === driverName ? "Toi : " : ""}{c.last.text}
+                        </span>
+                        {unread && (
+                          <span style={{ ...styles.navBadge, position: "static", flexShrink: 0, background: "#FFB43A", color: "#1A1206", border: "none", height: 20, minWidth: 20, borderRadius: 10, fontSize: 11 }}>
+                            {c.unread > 9 ? "9+" : c.unread}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    {c.unread > 0 && (
-                      <span style={{ ...styles.navBadge, position: "static" }}>{c.unread > 9 ? "9+" : c.unread}</span>
-                    )}
                   </button>
-                ))}
-              </div>
+                );
+              })
             )}
           </div>
         </div>
       )}
 
-      {chatRideId && (
-        <div style={styles.wizardOverlay}>
-          <div style={styles.fullPageHeader}>
-            <span style={{ width: 38 }} />
-            <h2 style={styles.fullPageTitle}>Discussion</h2>
-            <button onClick={() => setChatRideId(null)} style={styles.wizardNavBtn} aria-label="Fermer">
-              <X size={20} />
+      {chatRideId && (() => {
+        const chatRide = rides.find((r) => r.id === chatRideId);
+        const otherParty = chatRide
+          ? (chatRide.postedBy === driverName ? chatRide.takenBy || chatRide.pendingBy : chatRide.postedBy)
+          : null;
+        const otherPhone = otherParty ? profiles[otherParty]?.phone : null;
+        const canSend = chatInput.trim().length > 0;
+        return (
+        <div style={{
+          ...styles.wizardOverlay,
+          // Calé sur la zone visible : le clavier ne recouvre plus la saisie.
+          ...(chatViewport ? { bottom: "auto", top: chatViewport.top, height: chatViewport.height } : {}),
+        }}>
+          <div style={styles.chatHeader}>
+            <button onClick={() => setChatRideId(null)} style={styles.chatHeaderBtn} aria-label="Retour">
+              <ChevronLeft size={24} />
             </button>
-          </div>
-          <div style={{ ...styles.wizardBody, display: "flex", flexDirection: "column", gap: 12 }}>
-              {chatMessages.length === 0 && (
-                <p style={{ color: "var(--text-faint)", fontSize: 13, textAlign: "center", marginTop: 20 }}>
-                  Aucun message pour l'instant.
-                </p>
+            <div style={{ ...styles.chatAvatar, width: 40, height: 40, fontSize: 14 }}>{chatInitials(otherParty)}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 16, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {otherParty || "Discussion"}
+              </div>
+              {chatRide && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {chatRide.date ? `${formatRideDate(chatRide.date)}${chatRide.heure ? ` · ${chatRide.heure}` : ""} · ` : ""}
+                  {chatRide.depart} → {chatRide.arrivee}
+                </div>
               )}
-              {chatMessages.map((m) => {
-                const isMe = m.senderName === driverName;
-                return (
-                  <div
-                    key={m.id}
-                    style={{
-                      alignSelf: isMe ? "flex-end" : "flex-start",
-                      maxWidth: "76%",
-                      background: isMe ? "#FFB43A" : "var(--surface-tile)",
-                      color: isMe ? "#1A1206" : "var(--text-secondary)",
-                      padding: "13px 15px",
-                      borderRadius: isMe ? "16px 16px 5px 16px" : "16px 16px 16px 5px",
-                      fontSize: 14,
-                      fontWeight: isMe ? 600 : 500,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {!isMe && <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>{m.senderName}</div>}
-                    {m.text}
-                  </div>
-                );
-              })}
-              <div ref={chatEndRef} />
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-outline)" }}>
-              <input
+            {otherPhone && (
+              <a href={`tel:${otherPhone.replace(/\s/g, "")}`} style={{ ...styles.chatHeaderBtn, color: "#3BD07A", background: "rgba(59,208,122,0.12)" }} aria-label={`Appeler ${otherParty}`}>
+                <Phone size={19} />
+              </a>
+            )}
+          </div>
+
+          <div ref={chatScrollRef} style={styles.chatScroll}>
+            {chatMessages.length === 0 && (
+              <div style={{ margin: "auto", textAlign: "center", padding: "0 24px", color: "var(--text-muted)" }}>
+                <div style={styles.chatEmptyIcon}><MessageCircle size={26} /></div>
+                <div style={{ fontWeight: 800, fontSize: 15, color: "var(--text-primary)", marginBottom: 4 }}>Démarre la discussion</div>
+                <div style={{ fontSize: 13 }}>Écris un message ou choisis une réponse rapide ci-dessous.</div>
+              </div>
+            )}
+            {chatMessages.map((m, i) => {
+              const isMe = m.senderName === driverName;
+              const prev = chatMessages[i - 1];
+              const next = chatMessages[i + 1];
+              const newDay = !prev || new Date(prev.createdAt).toDateString() !== new Date(m.createdAt).toDateString();
+              const joinPrev = !newDay && prev.senderName === m.senderName && m.createdAt - prev.createdAt < CHAT_GROUP_GAP_MS;
+              const joinNext = next && next.senderName === m.senderName && next.createdAt - m.createdAt < CHAT_GROUP_GAP_MS
+                && new Date(next.createdAt).toDateString() === new Date(m.createdAt).toDateString();
+              const r = 18, tight = 5;
+              const radius = isMe
+                ? `${r}px ${joinPrev ? tight : r}px ${joinNext ? tight : r}px ${r}px`
+                : `${joinPrev ? tight : r}px ${r}px ${r}px ${joinNext ? tight : r}px`;
+              return (
+                <React.Fragment key={m.id}>
+                  {newDay && (
+                    <div style={styles.chatDaySep}><span style={styles.chatDayPill}>{chatDayLabel(m.createdAt)}</span></div>
+                  )}
+                  <div style={{
+                    alignSelf: isMe ? "flex-end" : "flex-start",
+                    maxWidth: "80%",
+                    marginTop: joinPrev ? 2 : 10,
+                    background: isMe ? "#FFB43A" : "var(--surface-tile)",
+                    color: isMe ? "#1A1206" : "var(--text-primary)",
+                    padding: "9px 13px 6px",
+                    borderRadius: radius,
+                    fontSize: 15,
+                    fontWeight: 500,
+                    lineHeight: 1.4,
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                  }}>
+                    {m.text}
+                    <span style={{ display: "block", textAlign: "right", fontSize: 10.5, marginTop: 2, opacity: isMe ? 0.6 : 0.55, fontWeight: 600 }}>
+                      {chatTime(m.createdAt)}
+                    </span>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          <div style={styles.chatComposer}>
+            <div style={styles.chatQuickRow}>
+              {CHAT_QUICK_REPLIES.map((q) => (
+                <button key={q} onClick={() => handleSendMessage(q)} style={styles.chatQuickChip}>{q}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: "0 12px" }}>
+              <textarea
+                ref={chatInputRef}
+                rows={1}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleSendMessage(); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
                 placeholder="Écrire un message…"
-                style={{ ...styles.input, flex: 1, minWidth: 0, background: "var(--surface-tile)", border: "none", borderRadius: 999 }}
+                style={styles.chatInput}
               />
               <button
-                onClick={handleSendMessage}
+                onClick={() => handleSendMessage()}
+                disabled={!canSend}
                 aria-label="Envoyer"
                 style={{
-                  width: 46, height: 46, borderRadius: "50%", background: "#FFB43A", border: "none",
-                  color: "#1A1206", display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, cursor: "pointer",
+                  ...styles.chatSendBtn,
+                  background: canSend ? "#FFB43A" : "var(--surface-tile)",
+                  color: canSend ? "#1A1206" : "var(--text-faint)",
+                  cursor: canSend ? "pointer" : "default",
                 }}
               >
                 <Send size={18} />
               </button>
             </div>
+          </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
