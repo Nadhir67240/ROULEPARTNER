@@ -14,7 +14,7 @@ import {
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
-  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail,
+  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
@@ -261,6 +261,16 @@ export default function App() {
   const [companyInput, setCompanyInput] = useState({ companyName: "", siret: "", companyAddress: "" });
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [emailRepairStatus, setEmailRepairStatus] = useState(null); // null | "loading" | { updated, checked } | { error }
+  // Résultat de la synchro avec Firebase Auth : null tant qu'elle n'a pas répondu
+  // (on affiche alors tout ce qu'on connaît), sinon les chauffeurs qui existent encore.
+  const [authSync, setAuthSync] = useState(null); // null | "loading" | { removed, activeNames } | { error }
+  useEffect(() => {
+    if (!showAdminPanel || user?.email !== ADMIN_EMAIL) return;
+    setAuthSync("loading");
+    syncDriversWithAuth()
+      .then(setAuthSync)
+      .catch((e) => setAuthSync({ error: e.message || "Échec" }));
+  }, [showAdminPanel, user]);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [newRidesBadge, setNewRidesBadge] = useState(0);
@@ -1519,6 +1529,13 @@ export default function App() {
     ...rides.map((r) => r.postedBy).filter(Boolean),
     ...rides.map((r) => r.takenBy).filter(Boolean),
   ]));
+  // Dans l'administration, on ne garde que les chauffeurs qui ont encore un compte
+  // Firebase (un nom qui ne subsiste que dans d'anciennes courses n'est plus un inscrit).
+  const normalizeDriverName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const activeDriverSet = authSync?.activeNames ? new Set(authSync.activeNames.map(normalizeDriverName)) : null;
+  const adminDriverNames = activeDriverSet
+    ? allKnownDriverNames.filter((n) => activeDriverSet.has(normalizeDriverName(n)))
+    : allKnownDriverNames;
 
   // Mes courses = historique complet (listenMyRides) + le flux général (plus frais pour
   // les courses toutes récentes). Le flux général seul s'arrête aux 200 dernières courses
@@ -3901,9 +3918,15 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
-            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 16 }}>
-              {allKnownDriverNames.length} chauffeur{allKnownDriverNames.length > 1 ? "s" : ""} connu{allKnownDriverNames.length > 1 ? "s" : ""}.
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 6 }}>
+              {adminDriverNames.length} chauffeur{adminDriverNames.length > 1 ? "s" : ""} inscrit{adminDriverNames.length > 1 ? "s" : ""}.
               Bannir un chauffeur le déconnecte immédiatement et l'empêche de se reconnecter.
+            </p>
+            <p style={{ color: authSync?.error ? "#E5484D" : "var(--text-faint)", fontSize: 12, marginBottom: 16 }}>
+              {authSync === "loading" ? "Synchronisation avec Firebase…"
+                : authSync?.error ? `Synchro Firebase impossible : ${authSync.error}`
+                : authSync?.removed?.length > 0 ? `Synchronisé avec Firebase — retiré${authSync.removed.length > 1 ? "s" : ""} : ${authSync.removed.join(", ")}.`
+                : authSync ? "Synchronisé avec Firebase." : ""}
             </p>
             <div style={{ marginBottom: 16 }}>
               <button
@@ -3964,7 +3987,7 @@ export default function App() {
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {allKnownDriverNames
+              {[...adminDriverNames]
                 .sort((a, b) => a.localeCompare(b))
                 .map((name) => {
                   const p = profiles[name] || {};

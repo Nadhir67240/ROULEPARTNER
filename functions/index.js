@@ -442,3 +442,91 @@ exports.assignProfileEmail = onCall({ timeoutSeconds: 30 }, async (request) => {
   await db.collection("profiles").doc(name).set({ email }, { merge: true });
   return { ok: true };
 });
+
+// --- Synchro avec Firebase Auth ---
+// Supprimer un compte dans la console Firebase (Authentication) n'efface que le
+// compte de connexion : sa fiche, sa position, son jeton de notification et sa
+// licence restaient dans Firestore, et l'appli continuait d'afficher le chauffeur.
+// Les courses et messages passés sont volontairement conservés (historique).
+async function purgeDriverData(name) {
+  if (!name) return;
+  const batch = db.batch();
+  batch.delete(db.collection("profiles").doc(name));
+  batch.delete(db.collection("positions").doc(name));
+  batch.delete(db.collection("fcmTokens").doc(name));
+  const licenses = await db.collection("licenses").where("owner", "==", name).get();
+  licenses.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
+}
+
+// Automatique : dès qu'un compte est supprimé dans Firebase Auth, on efface ses données.
+// (Pas d'équivalent v2 pour cet événement, d'où la v1.)
+const functionsV1 = require("firebase-functions/v1");
+exports.cleanupDeletedUser = functionsV1.region("europe-west1").auth.user().onDelete(async (user) => {
+  if (user.email === ADMIN_EMAIL) return;
+  const names = new Set();
+  if (user.email) {
+    const snap = await db.collection("profiles").where("email", "==", user.email).get();
+    snap.forEach((d) => names.add(d.id));
+  }
+  if (user.displayName) {
+    const p = await db.collection("profiles").doc(user.displayName).get();
+    // Sans email sur la fiche on se fie au nom ; avec un autre email, c'est quelqu'un d'autre.
+    if (!p.exists || !p.data().email || p.data().email === user.email) names.add(user.displayName);
+  }
+  for (const name of names) await purgeDriverData(name);
+});
+
+// Réservé à l'admin. Rattrape les comptes supprimés avant la mise en place de
+// cleanupDeletedUser : efface les fiches/positions qui ne correspondent plus à aucun
+// compte Auth, et renvoie la liste des chauffeurs qui existent réellement.
+exports.syncDriversWithAuth = onCall({ timeoutSeconds: 60 }, async (request) => {
+  if (request.auth?.token?.email !== ADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
+  }
+  const normalize = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const authEmails = new Set();
+  const authNames = new Set();
+  const authDisplayNames = [];
+  let pageToken;
+  do {
+    const page = await admin.auth().listUsers(1000, pageToken);
+    for (const u of page.users) {
+      if (u.email) authEmails.add(u.email.toLowerCase());
+      if (u.displayName) {
+        authNames.add(normalize(u.displayName));
+        authDisplayNames.push(u.displayName);
+      }
+    }
+    pageToken = page.pageToken;
+  } while (pageToken);
+  // Garde-fou : une liste Auth vide signifierait tout effacer — on n'y touche pas.
+  if (authEmails.size === 0) throw new HttpsError("failed-precondition", "Aucun compte Auth trouvé, synchro annulée.");
+
+  const exists = (name, email) =>
+    (email && authEmails.has(String(email).toLowerCase())) || authNames.has(normalize(name));
+
+  const removed = [];
+  const kept = [];
+  const profilesSnap = await db.collection("profiles").get();
+  for (const d of profilesSnap.docs) {
+    const email = d.data().email;
+    if (email === ADMIN_EMAIL || exists(d.id, email)) {
+      kept.push(d.id);
+    } else {
+      await purgeDriverData(d.id);
+      removed.push(d.id);
+    }
+  }
+  // Positions (et jetons) sans fiche : chauffeurs disparus dont il ne reste que ça.
+  for (const col of ["positions", "fcmTokens"]) {
+    const snap = await db.collection(col).get();
+    for (const d of snap.docs) {
+      if (kept.includes(d.id) || exists(d.id, null)) continue;
+      await purgeDriverData(d.id);
+      if (!removed.includes(d.id)) removed.push(d.id);
+    }
+  }
+  // activeNames : tous les chauffeurs qui ont encore un compte (fiche ou nom Auth).
+  return { removed, activeNames: [...new Set([...kept, ...authDisplayNames])], authUserCount: authEmails.size };
+});

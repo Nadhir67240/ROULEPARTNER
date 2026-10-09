@@ -370,6 +370,14 @@ export async function backfillProfileEmails() {
   return res.data;
 }
 
+// Réservé à l'admin : efface les données des chauffeurs dont le compte a été supprimé
+// dans Firebase Auth, et renvoie la liste des chauffeurs qui existent encore.
+export async function syncDriversWithAuth() {
+  const call = httpsCallable(functions, "syncDriversWithAuth");
+  const res = await call();
+  return res.data;
+}
+
 // Réservé à l'admin : associe manuellement un email Firebase Auth à un profil,
 // pour les cas que backfillProfileEmails ne peut pas résoudre automatiquement.
 export async function assignProfileEmail(name, email) {
