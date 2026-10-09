@@ -277,6 +277,7 @@ export default function App() {
   const filterRef = useRef("dispo");
   const [banTarget, setBanTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteStatus, setDeleteStatus] = useState(null); // null | "loading" | { error }
   const [banReason, setBanReason] = useState("");
   const [bannedNotice, setBannedNotice] = useState(false);
   const isAdmin = user?.email === ADMIN_EMAIL;
@@ -4052,7 +4053,7 @@ export default function App() {
                               {p.banned ? "Réactiver" : "Bannir"}
                             </button>
                             <button
-                              onClick={() => setDeleteTarget(name)}
+                              onClick={() => { setDeleteStatus(null); setDeleteTarget(name); }}
                               style={{ ...styles.btnGhost, borderColor: "#E5484D", color: "#E5484D", fontSize: 12, padding: "6px 10px" }}
                             >
                               Supprimer
@@ -4079,22 +4080,36 @@ export default function App() {
               </button>
             </div>
             <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 12 }}>
-              Son téléphone et sa commune seront effacés, sa position retirée de la carte, et il ne pourra
-              plus jamais se reconnecter tant que tu n'auras pas cliqué "Restaurer". Ses courses passées
-              restent visibles dans l'historique.
+              Son compte sera supprimé de Firebase : il ne pourra plus se connecter, sa fiche, sa position
+              et sa licence seront effacées (le numéro de licence redevient libre). C'est définitif — il
+              devra se réinscrire. Ses courses et messages passés restent dans l'historique.
             </p>
+            {deleteStatus?.error && (
+              <p style={{ color: "#E5484D", fontSize: 12.5, marginBottom: 12 }}>Échec de la suppression : {deleteStatus.error}</p>
+            )}
             <div style={styles.modalActions}>
               <button onClick={() => setDeleteTarget(null)} style={styles.btnGhost}>
                 Annuler
               </button>
               <button
                 onClick={async () => {
-                  await deleteDriverAccount(deleteTarget);
-                  setDeleteTarget(null);
+                  setDeleteStatus("loading");
+                  try {
+                    await deleteDriverAccount(deleteTarget);
+                    // La liste admin filtre sur les comptes encore actifs : on retire le nom tout de suite.
+                    setAuthSync((prev) => (prev?.activeNames
+                      ? { ...prev, activeNames: prev.activeNames.filter((n) => n !== deleteTarget) }
+                      : prev));
+                    setDeleteStatus(null);
+                    setDeleteTarget(null);
+                  } catch (e) {
+                    setDeleteStatus({ error: e.message || "Échec" });
+                  }
                 }}
+                disabled={deleteStatus === "loading"}
                 style={{ ...styles.btnPrimary, background: "#E5484D" }}
               >
-                Supprimer définitivement
+                {deleteStatus === "loading" ? "Suppression…" : "Supprimer définitivement"}
               </button>
             </div>
           </div>

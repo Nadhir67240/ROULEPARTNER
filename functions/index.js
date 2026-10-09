@@ -530,3 +530,36 @@ exports.syncDriversWithAuth = onCall({ timeoutSeconds: 60 }, async (request) => 
   // activeNames : tous les chauffeurs qui ont encore un compte (fiche ou nom Auth).
   return { removed, activeNames: [...new Set([...kept, ...authDisplayNames])], authUserCount: authEmails.size };
 });
+
+// Réservé à l'admin. Suppression complète d'un chauffeur depuis l'appli : son compte
+// de connexion Firebase Auth (le navigateur ne peut pas le faire lui-même) et ses
+// données (fiche, position, notifications, licence). Courses et messages conservés.
+exports.deleteDriver = onCall({ timeoutSeconds: 30 }, async (request) => {
+  if (request.auth?.token?.email !== ADMIN_EMAIL) {
+    throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
+  }
+  const name = request.data?.name;
+  if (!name) throw new HttpsError("invalid-argument", "name requis.");
+
+  const profile = await db.collection("profiles").doc(name).get();
+  const email = profile.exists ? profile.data().email : null;
+  if (email === ADMIN_EMAIL) throw new HttpsError("failed-precondition", "Impossible de supprimer l'administrateur.");
+
+  // On retrouve le compte Auth par l'email de la fiche, sinon par le nom affiché.
+  let authUser = email ? await admin.auth().getUserByEmail(email).catch(() => null) : null;
+  if (!authUser) {
+    let pageToken;
+    do {
+      const page = await admin.auth().listUsers(1000, pageToken);
+      authUser = page.users.find((u) => u.displayName === name) || null;
+      pageToken = authUser ? undefined : page.pageToken;
+    } while (pageToken);
+  }
+  if (authUser?.email === ADMIN_EMAIL) throw new HttpsError("failed-precondition", "Impossible de supprimer l'administrateur.");
+
+  if (authUser) await admin.auth().deleteUser(authUser.uid);
+  // cleanupDeletedUser le fait aussi, mais on n'attend pas le déclencheur : la liste
+  // de l'admin se met à jour tout de suite.
+  await purgeDriverData(name);
+  return { ok: true, authDeleted: !!authUser };
+});

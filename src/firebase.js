@@ -346,14 +346,13 @@ export async function setDriverBanned(name, banned, reason = "") {
   await setDoc(ref, { banned, bannedReason: banned ? reason : "" }, { merge: true });
 }
 
-// Réservé à l'administrateur. On ne peut pas supprimer le compte Firebase Auth
-// depuis le navigateur (ça demanderait un petit programme serveur), donc on
-// "supprime" ce qu'on peut : la position, les infos personnelles, et un
-// bannissement permanent qui empêche toute reconnexion tant que ce n'est pas restauré.
+// Réservé à l'administrateur. Le navigateur ne peut pas supprimer un compte Firebase
+// Auth : c'est la fonction Cloud deleteDriver qui supprime le compte de connexion et
+// les données du chauffeur (fiche, position, notifications, licence).
 export async function deleteDriverAccount(name) {
-  await clearDriverPosition(name).catch(() => {});
-  const ref = doc(profilesCol, name);
-  await setDoc(ref, { banned: true, deleted: true, phone: "", commune: "" }, { merge: true });
+  const call = httpsCallable(functions, "deleteDriver");
+  const res = await call({ name });
+  return res.data;
 }
 
 export async function restoreDriverAccount(name) {
