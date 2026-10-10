@@ -74,11 +74,14 @@ async function loadPositions() {
   return positions;
 }
 
-// Un chauffeur a un jeton par appareil (map "tokens", écrite par registerFcmToken) ; le
-// champ "token" unique est l'ancien format, encore présent chez ceux qui n'ont pas rouvert l'appli.
+// Un chauffeur a un jeton par appareil (map "devices" : identifiant d'appareil -> { token },
+// écrite par registerFcmToken). "tokens" (map par jeton) et "token" (champ unique) sont les
+// anciens formats, encore présents chez ceux qui n'ont pas rouvert l'appli depuis.
 function tokensOf(data) {
-  const set = new Set(Object.keys((data && data.tokens) || {}));
-  if (data && data.token) set.add(data.token);
+  if (!data) return [];
+  const set = new Set(Object.keys(data.tokens || {}));
+  Object.values(data.devices || {}).forEach((d) => d && d.token && set.add(d.token));
+  if (data.token) set.add(data.token);
   return [...set];
 }
 
@@ -136,6 +139,9 @@ async function sendTo(entries, payload) {
         badge: "/badge-96.png",
         requireInteraction: payload.requireInteraction === true,
         tag: payload.data.rideId,
+        // Fait re-sonner une notif qui remplace la précédente de la même course (prise,
+        // départ, fin…) — c'est désormais Firebase qui l'affiche, plus le service worker.
+        renotify: true,
       },
       fcmOptions: { link: "/" },
     },
@@ -164,8 +170,13 @@ async function sendTo(entries, payload) {
       try {
         const snap = await ref.get();
         if (!snap.exists) return;
-        const args = [new admin.firestore.FieldPath("tokens", token), admin.firestore.FieldValue.delete()];
-        if (snap.data().token === token) args.push("token", admin.firestore.FieldValue.delete());
+        const del = admin.firestore.FieldValue.delete();
+        const data = snap.data();
+        const args = [new admin.firestore.FieldPath("tokens", token), del];
+        if (data.token === token) args.push("token", del);
+        for (const [deviceId, d] of Object.entries(data.devices || {})) {
+          if (d && d.token === token) args.push(new admin.firestore.FieldPath("devices", deviceId), del);
+        }
         await ref.update(...args);
       } catch {}
     })

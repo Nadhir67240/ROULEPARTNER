@@ -22,6 +22,10 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
+  // Un push avec une partie "notification" (tous ceux de functions/index.js) est déjà
+  // affiché automatiquement par Firebase, avec les options webpush du serveur : le
+  // réafficher ici faisait sonner chaque notif en double sur le téléphone.
+  if (payload.notification) return;
   const n = payload.notification || {};
   const d = payload.data || {};
   const isPriority = d.priority === "true";

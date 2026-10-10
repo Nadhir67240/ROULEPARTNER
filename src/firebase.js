@@ -402,12 +402,27 @@ const VAPID_KEY = "BJM083fCjLvVEZNnP2NmsQM146hHmdKNIpZTIMCFx9IXScg1qJH4gWFgiEUPd
 // compte test ne doit plus recevoir les notifs du chauffeur qui s'est déconnecté.
 let registeredFcm = null;
 
+// Identifiant stable de l'appareil : quand son jeton FCM change, il REMPLACE l'ancien
+// au lieu de s'y ajouter (sinon le même téléphone recevait chaque notif en double).
+function fcmDeviceId() {
+  try {
+    let id = localStorage.getItem("rp-device-id");
+    if (!id) {
+      id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/[^a-zA-Z0-9-]/g, "");
+      localStorage.setItem("rp-device-id", id);
+    }
+    return id;
+  } catch {
+    return "sans-stockage";
+  }
+}
+
 async function unregisterFcmToken() {
   if (!registeredFcm) return;
-  const { driverName, token } = registeredFcm;
+  const { driverName } = registeredFcm;
   registeredFcm = null;
   try {
-    await updateDoc(doc(fcmTokensCol, driverName), new FieldPath("tokens", token), deleteField());
+    await updateDoc(doc(fcmTokensCol, driverName), new FieldPath("devices", fcmDeviceId()), deleteField());
   } catch (e) {
     console.warn("unregisterFcmToken:", e);
   }
@@ -421,14 +436,18 @@ export async function registerFcmToken(driverName) {
     const messaging = getMessaging(app);
     const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
     if (token) {
-      // Un jeton PAR APPAREIL (map tokens) : avec un seul champ "token", le dernier
-      // appareil ouvert (ex. l'ordinateur) écrasait celui du téléphone, qui ne
-      // recevait plus aucune notif.
+      // Un jeton PAR APPAREIL (map devices, clé = identifiant de l'appareil) : avec un seul
+      // champ "token", le dernier appareil ouvert (ex. l'ordinateur) écrasait celui du
+      // téléphone. Les anciens formats ("token", map "tokens" par jeton) sont effacés : ils
+      // gardaient d'anciens jetons du même téléphone, d'où des notifs en double.
       await setDoc(
         doc(fcmTokensCol, driverName),
-        // deleteField : retire l'ancien champ "token" unique, qui pointait vers un autre
-        // appareil et faisait recevoir la notif en double.
-        { tokens: { [token]: Date.now() }, token: deleteField(), updatedAt: Date.now() },
+        {
+          devices: { [fcmDeviceId()]: { token, updatedAt: Date.now() } },
+          token: deleteField(),
+          tokens: deleteField(),
+          updatedAt: Date.now(),
+        },
         { merge: true }
       );
       registeredFcm = { driverName, token };
