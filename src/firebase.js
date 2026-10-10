@@ -16,6 +16,7 @@ import {
   orderBy,
   limit,
   runTransaction,
+  writeBatch,
   disableNetwork,
   enableNetwork,
   connectFirestoreEmulator,
@@ -229,19 +230,49 @@ export function listenMyRides(driverName, callback) {
   };
 }
 
+// Photo et PDF du bon de transport : rangés à part, dans rides/{id}/prive/bon, que les
+// règles Firestore ne laissent lire qu'au posteur, au demandeur, au preneur et à l'admin.
+// La fiche de la course (lue par tous les chauffeurs) n'en garde que hasPhoto / hasDocument.
+function rideAttachmentRef(rideId) {
+  return doc(ridesCol, rideId, "prive", "bon");
+}
+
+export async function getRideAttachment(rideId) {
+  const snap = await getDoc(rideAttachmentRef(rideId));
+  return snap.exists() ? snap.data() : null;
+}
+
 export async function addRide(ride) {
-  const ref = doc(ridesCol, ride.id);
-  await setDoc(ref, ride);
+  const { photo = null, document: pdf = null, documentName = "", ...data } = ride;
+  const batch = writeBatch(db);
+  batch.set(doc(ridesCol, ride.id), { ...data, hasPhoto: !!photo, hasDocument: !!pdf });
+  if (photo || pdf) batch.set(rideAttachmentRef(ride.id), { photo, document: pdf, documentName });
+  await batch.commit();
 }
 
 export async function updateRide(id, patch) {
   const ref = doc(ridesCol, id);
-  await updateDoc(ref, patch);
+  if (!("photo" in patch) && !("document" in patch)) {
+    await updateDoc(ref, patch);
+    return;
+  }
+  const { photo = null, document: pdf = null, documentName = "", ...data } = patch;
+  const batch = writeBatch(db);
+  // Les anciennes courses avaient la photo / le PDF directement dans la fiche : on les en retire.
+  batch.update(ref, {
+    ...data, hasPhoto: !!photo, hasDocument: !!pdf,
+    photo: deleteField(), document: deleteField(), documentName: deleteField(),
+  });
+  if (photo || pdf) batch.set(rideAttachmentRef(id), { photo, document: pdf, documentName });
+  else batch.delete(rideAttachmentRef(id));
+  await batch.commit();
 }
 
 export async function deleteRide(id) {
-  const ref = doc(ridesCol, id);
-  await deleteDoc(ref);
+  const batch = writeBatch(db);
+  batch.delete(rideAttachmentRef(id));
+  batch.delete(doc(ridesCol, id));
+  await batch.commit();
 }
 
 // Prise d'une course en "premier arrivé, premier servi".

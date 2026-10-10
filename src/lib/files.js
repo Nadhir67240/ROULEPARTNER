@@ -43,7 +43,7 @@ export function compressPhoto(file) {
 // Ouvre un PDF stocké en base64 de façon fiable sur mobile — un lien <a href
 // download> sur une "data URL" est souvent ignoré silencieusement par Safari
 // iOS. On passe par un Blob, que le navigateur sait afficher/télécharger
-// correctement dans un nouvel onglet.
+// correctement dans un nouvel onglet. Sert aussi pour la photo du bon (JPEG).
 export async function openPdfDocument(dataUrl, filename) {
   try {
     const res = await fetch(dataUrl);

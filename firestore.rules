@@ -86,6 +86,15 @@ service cloud.firestore {
       );
     }
 
+    // Photo / PDF du bon : jamais dans la fiche de la course (lisible par tous), seulement
+    // dans rides/{id}/prive/bon. Les anciennes courses qui les contiennent encore peuvent
+    // les garder tels quels ou les retirer, mais pas en ajouter de nouveaux.
+    function noInlineAttachment() {
+      return request.resource.data.get('photo', null) in [null, resource.data.get('photo', null)]
+        && request.resource.data.get('document', null) in [null, resource.data.get('document', null)]
+        && request.resource.data.get('documentName', null) in [null, resource.data.get('documentName', null)];
+    }
+
     match /rides/{rideId} {
       allow read: if isVerified();
       allow create: if isAdmin() || (
@@ -93,12 +102,15 @@ service cloud.firestore {
         && request.resource.data.postedBy == request.auth.token.name
         && !('priorityDrivers' in request.resource.data)
         && !('priorityUntil' in request.resource.data)
+        && !('photo' in request.resource.data)
+        && !('document' in request.resource.data)
+        && !('documentName' in request.resource.data)
       );
       allow delete: if isAdmin() || (isVerified() && !isBanned() && resource.data.postedBy == request.auth.token.name);
       // Le posteur garde la main sur sa course (modifier, confirmer, refuser...). Les autres
       // chauffeurs n'ont droit qu'aux gestes prévus par l'appli, champ par champ :
       allow update: if isAdmin() || (
-        isVerified() && !isBanned() && priorityFieldsUnchanged() && (
+        isVerified() && !isBanned() && priorityFieldsUnchanged() && noInlineAttachment() && (
           resource.data.postedBy == request.auth.token.name
           || isClaim()
           || isRequesterCancel()
@@ -106,6 +118,23 @@ service cloud.firestore {
           || isTakerAction()
         )
       );
+
+      // Photo / PDF du bon : lisibles seulement par le posteur, le chauffeur qui a demandé
+      // ou pris la course, et l'admin. Seul le posteur les écrit (getAfter : la course peut
+      // être créée dans le même lot d'écritures).
+      match /prive/{docId} {
+        function rideNow() {
+          return get(/databases/$(database)/documents/rides/$(rideId)).data;
+        }
+        allow read: if isAdmin() || (isVerified() && (
+          rideNow().postedBy == request.auth.token.name
+          || rideNow().get('takenBy', null) == request.auth.token.name
+          || rideNow().get('pendingBy', null) == request.auth.token.name
+        ));
+        allow create, update: if isAdmin() || (isVerified() && !isBanned()
+          && getAfter(/databases/$(database)/documents/rides/$(rideId)).data.postedBy == request.auth.token.name);
+        allow delete: if isAdmin() || (isVerified() && !isBanned() && rideNow().postedBy == request.auth.token.name);
+      }
     }
 
     match /positions/{driverId} {

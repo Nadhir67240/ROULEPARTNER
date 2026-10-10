@@ -5,11 +5,11 @@ import {
   Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
   Phone, List, Map as MapIcon, History, CalendarDays,
-  FileText, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
+  FileText, Camera, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
   Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
 } from "lucide-react";
 import {
-  listenRides, listenMyRides, addRide, updateRide, deleteRide, claimRide,
+  listenRides, listenMyRides, addRide, updateRide, deleteRide, claimRide, getRideAttachment,
   listenPositions, setDriverPosition, clearDriverPosition,
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
@@ -444,6 +444,7 @@ export default function App() {
   // Course telle qu'elle était à l'ouverture de "Modifier" : sert à repérer ce qui a changé
   // quand le posteur corrige une course déjà acceptée, pour prévenir le chauffeur.
   const editOriginalRideRef = useRef(null);
+  const editOriginalAttachRef = useRef(null); // sa photo / son PDF du bon (rangés à part dans la base)
   // Bandeaux "course modifiée" déjà vus par ce chauffeur : { [rideId]: modifiedAfterAccept.at }.
   const [seenModifs, setSeenModifs] = useState(() => {
     try { return JSON.parse(localStorage.getItem("rp-seen-modifs") || "{}"); } catch { return {}; }
@@ -877,6 +878,37 @@ export default function App() {
     });
   }, [rides]);
 
+  // Photo / PDF du bon de la course ouverte, chargés d'avance (seulement si on y a droit :
+  // posteur, demandeur ou preneur) pour que le bouton les ouvre tout de suite — un
+  // window.open après une attente réseau est souvent bloqué sur mobile.
+  const [selectedAttach, setSelectedAttach] = useState(null);
+  const selectedLive = selectedRide ? rides.find((x) => x.id === selectedRide.id) || selectedRide : null;
+  const selectedAttachKey = selectedLive && (selectedLive.hasPhoto || selectedLive.hasDocument)
+    && [selectedLive.postedBy, selectedLive.takenBy, selectedLive.pendingBy].includes(driverName)
+    ? [selectedLive.id, selectedLive.takenBy, selectedLive.pendingBy, selectedLive.hasPhoto, selectedLive.hasDocument, selectedLive.modifiedAfterAccept?.at].join("|")
+    : null;
+  useEffect(() => {
+    setSelectedAttach(null);
+    if (!selectedAttachKey) return;
+    const rideId = selectedAttachKey.split("|")[0];
+    let cancelled = false;
+    getRideAttachment(rideId)
+      .then((att) => { if (!cancelled) setSelectedAttach(att ? { rideId, ...att } : null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedAttachKey]);
+
+  // Ouvre la photo ou le PDF du bon (anciennes courses : encore rangés dans la fiche elle-même).
+  const openRideAttachment = (r, kind) => {
+    const att = r[kind] ? r : selectedAttach?.rideId === r.id ? selectedAttach : null;
+    if (!att?.[kind]) {
+      setError("Bon de transport encore en chargement, réessaie dans un instant.");
+      return;
+    }
+    const filename = kind === "photo" ? `bon-transport-${r.id}.jpg` : att.documentName || `bon-transport-${r.id}.pdf`;
+    openPdfDocument(att[kind], filename);
+  };
+
   const driverNameRef = useRef(driverName);
   useEffect(() => {
     driverNameRef.current = driverName;
@@ -1045,7 +1077,7 @@ export default function App() {
         const original = rides.find((r) => r.id === editingId) || myRides.find((r) => r.id === editingId) || editOriginalRideRef.current;
         const patch = { ...form };
         if (original && original.status !== "disponible") {
-          const changes = rideChangesForTaker(original, form);
+          const changes = rideChangesForTaker({ ...original, ...editOriginalAttachRef.current }, form);
           if (changes.length) {
             // On cumule avec les corrections précédentes : le bandeau montre tout ce qui a changé
             // depuis l'acceptation, en gardant pour chaque champ la valeur d'origine.
@@ -1241,8 +1273,25 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const startEdit = (r) => {
+  // Photo / PDF du bon d'une course, pour pré-remplir le formulaire (rangés à part dans la
+  // base, sauf sur les anciennes courses où ils sont encore dans la fiche).
+  const loadRideAttachment = async (r) => {
+    if (r.photo || r.document) return { photo: r.photo || null, document: r.document || null, documentName: r.documentName || "" };
+    const att = r.hasPhoto || r.hasDocument ? await getRideAttachment(r.id) : null;
+    return { photo: att?.photo || null, document: att?.document || null, documentName: att?.documentName || "" };
+  };
+
+  const startEdit = async (r) => {
+    let att;
+    try {
+      att = await loadRideAttachment(r);
+    } catch (e) {
+      // Sans ça, enregistrer la modification effacerait la photo / le PDF existants.
+      setError("Impossible de charger le bon de transport de la course, réessaie.");
+      return;
+    }
     editOriginalRideRef.current = r;
+    editOriginalAttachRef.current = att;
     editOriginalTarifInputs.current = {
       departLat: r.departLat, departLng: r.departLng, arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng,
       departCity: r.departCity || "", departDept: r.departDept || "", arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
@@ -1257,7 +1306,7 @@ export default function App() {
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
-      photo: r.photo || null, document: r.document || null, documentName: r.documentName || "",
+      ...att,
     });
     setEditingId(r.id);
     setShowForm(true);
@@ -1266,7 +1315,12 @@ export default function App() {
     setSelectedRide(null);
   };
 
-  const duplicateRide = (r) => {
+  const duplicateRide = async (r) => {
+    // Le bon n'est recopié que pour qui a le droit de le voir (posteur, demandeur, preneur).
+    const canSeeBon = [r.postedBy, r.takenBy, r.pendingBy].includes(driverName);
+    const att = canSeeBon
+      ? await loadRideAttachment(r).catch(() => ({ photo: null, document: null, documentName: "" }))
+      : { photo: null, document: null, documentName: "" };
     editOriginalTarifInputs.current = null;
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
@@ -1275,7 +1329,7 @@ export default function App() {
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
-      photo: r.photo || null, document: r.document || null, documentName: r.documentName || "",
+      ...att,
     });
     setEditingId(null);
     setShowForm(true);
@@ -3077,7 +3131,11 @@ export default function App() {
                   </div>
                 )}
 
-                {r.photo && <img src={r.photo} alt="Bon de transport" style={styles.cardThumb} />}
+                {(r.hasPhoto || r.photo) && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "var(--text-faint)", fontSize: 12, marginBottom: 10 }}>
+                    <Camera size={12} /> Photo du bon jointe
+                  </div>
+                )}
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
                   <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0 }}>
@@ -3380,16 +3438,28 @@ export default function App() {
                 </div>
               )}
 
-              {r.photo && (
-                <a href={r.photo} download={`bon-transport-${r.id}.jpg`}>
-                  <img src={r.photo} alt="Bon de transport" style={styles.modalPhoto} />
-                </a>
-              )}
-
-              {r.document && (mine || takenByMe || pendingByMe) && (
+              {(r.hasPhoto || r.photo) && (mine || takenByMe || pendingByMe) && (
                 <button
                   type="button"
-                  onClick={() => openPdfDocument(r.document, r.documentName || `bon-transport-${r.id}.pdf`)}
+                  onClick={() => openRideAttachment(r, "photo")}
+                  style={{
+                    ...styles.contactBtn, display: "block", width: "100%", marginTop: 10,
+                    textAlign: "center", border: "none", cursor: "pointer",
+                  }}
+                >
+                  <Camera size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Voir la photo du bon de transport
+                </button>
+              )}
+              {(r.hasPhoto || r.photo) && !mine && !takenByMe && !pendingByMe && (
+                <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 10, display: "flex", alignItems: "center", gap: 5 }}>
+                  <Camera size={12} /> Une photo du bon est jointe — accessible une fois la course prise.
+                </p>
+              )}
+
+              {(r.hasDocument || r.document) && (mine || takenByMe || pendingByMe) && (
+                <button
+                  type="button"
+                  onClick={() => openRideAttachment(r, "document")}
                   style={{
                     ...styles.contactBtn, display: "block", width: "100%", marginTop: 10,
                     textAlign: "center", border: "none", cursor: "pointer",
@@ -3398,7 +3468,7 @@ export default function App() {
                   <FileText size={13} style={{ verticalAlign: -2, marginRight: 4 }} /> Ouvrir le bon de transport (PDF)
                 </button>
               )}
-              {r.document && !mine && !takenByMe && !pendingByMe && (
+              {(r.hasDocument || r.document) && !mine && !takenByMe && !pendingByMe && (
                 <p style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 10, display: "flex", alignItems: "center", gap: 5 }}>
                   <FileText size={12} /> Un bon de transport est joint — accessible une fois la course prise.
                 </p>

@@ -6,7 +6,8 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import {
-  getFirestore, connectFirestoreEmulator, doc, setDoc, updateDoc, getDoc, serverTimestamp, Timestamp,
+  getFirestore, connectFirestoreEmulator, doc, setDoc, updateDoc, getDoc, deleteDoc, serverTimestamp, Timestamp,
+  writeBatch, deleteField,
 } from "firebase/firestore";
 
 const PROJECT_ID = "demo-roulepartner";
@@ -125,6 +126,53 @@ await expect("autre chauffeur démarre une course qui n'est pas à lui", false, 
   updateDoc(doc(other.db, "rides/c8"), { status: "en_cours", startedAt: Date.now() }));
 await expect("posteur modifie sa course (tarif)", true, () =>
   updateDoc(doc(poster.db, "rides/c8"), { tarif: "45" }));
+
+// --- Photo / PDF du bon (rides/{id}/prive/bon) ---
+// Course telle que l'appli la crée (sans les champs de priorité, écrits par la Cloud Function).
+const newRide = (over) => {
+  const { priorityDrivers, priorityUntil, ...ride } = baseRide(over);
+  return ride;
+};
+await adminSet("b1", baseRide({ hasPhoto: true }));
+await adminSet("b1/prive/bon", { photo: "data:image/jpeg;base64,AAAA", document: null, documentName: "" });
+await expect("autre chauffeur lit la photo du bon", false, () => getDoc(doc(other.db, "rides/b1/prive/bon")));
+await expect("posteur lit la photo du bon", true, () => getDoc(doc(poster.db, "rides/b1/prive/bon")));
+await expect("demandeur lit la photo avant d'avoir demandé la course", false, () => getDoc(doc(req.db, "rides/b1/prive/bon")));
+await updateDoc(doc(req.db, "rides/b1"), { status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: serverTimestamp() });
+await expect("demandeur lit la photo une fois la course demandée", true, () => getDoc(doc(req.db, "rides/b1/prive/bon")));
+await expect("autre chauffeur remplace la photo du bon", false, () =>
+  setDoc(doc(other.db, "rides/b1/prive/bon"), { photo: "data:x", document: null, documentName: "" }));
+await expect("autre chauffeur supprime la photo du bon", false, () => deleteDoc(doc(other.db, "rides/b1/prive/bon")));
+
+await expect("posteur publie une course + son bon (même lot)", true, () => {
+  const b = writeBatch(poster.db);
+  b.set(doc(poster.db, "rides/b2"), newRide({ hasPhoto: true }));
+  b.set(doc(poster.db, "rides/b2/prive/bon"), { photo: "data:x", document: null, documentName: "" });
+  return b.commit();
+});
+await expect("autre chauffeur glisse un bon sur la course d'un autre", false, () =>
+  setDoc(doc(other.db, "rides/b3/prive/bon"), { photo: "data:x" }));
+await expect("posteur publie une course avec la photo dans la fiche", false, () =>
+  setDoc(doc(poster.db, "rides/b4"), newRide({ photo: "data:x" })));
+await expect("posteur ajoute une photo dans la fiche d'une course", false, () =>
+  updateDoc(doc(poster.db, "rides/b2"), { photo: "data:x" }));
+
+// Ancienne course avec la photo encore dans la fiche.
+await adminSet("b5", baseRide({ photo: "data:ancienne" }));
+await expect("demande de prise sur une ancienne course avec photo", true, () =>
+  updateDoc(doc(req.db, "rides/b5"), { status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
+await expect("posteur retire la photo de la fiche (migration à la modification)", true, () => {
+  const b = writeBatch(poster.db);
+  b.update(doc(poster.db, "rides/b5"), { photo: deleteField(), hasPhoto: true });
+  b.set(doc(poster.db, "rides/b5/prive/bon"), { photo: "data:ancienne", document: null, documentName: "" });
+  return b.commit();
+});
+await expect("posteur supprime la course et son bon (même lot)", true, () => {
+  const b = writeBatch(poster.db);
+  b.delete(doc(poster.db, "rides/b5/prive/bon"));
+  b.delete(doc(poster.db, "rides/b5"));
+  return b.commit();
+});
 
 // --- Fiche profil à l'inscription (email pas encore confirmé) ---
 const nouveau = await makeUser("Nouveau", { verified: false });
