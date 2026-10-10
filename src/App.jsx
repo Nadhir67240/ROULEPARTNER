@@ -665,6 +665,7 @@ export default function App() {
     } catch (err) {
       setAuthError(
         err.message === "license_taken" ? "Ce numéro de licence est déjà associé à un autre compte." :
+        err.message === "name_taken" ? "Ce nom est déjà pris par un autre chauffeur — choisis-en un autre (ajoute une initiale, un chiffre…)." :
         err.code === "auth/email-already-in-use" ? "Cet email a déjà un compte — connecte-toi plutôt." :
         err.code === "auth/invalid-email" ? "Adresse email invalide." :
         "Échec de l'inscription. Vérifie tes infos et réessaie."

@@ -2,6 +2,8 @@ const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
+// Les événements Firebase Auth (création / suppression de compte) n'existent qu'en v1.
+const functionsV1 = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -339,28 +341,41 @@ exports.remindUpcomingRides = onSchedule(
     if (sent.length) console.log(`remindUpcomingRides: ${sent.length} rappel(s) — ${sent.join(", ")}`);
   }
 );
-// Prévient l'admin à chaque nouvelle inscription de chauffeur. Reprend ce que faisait
-// l'ancien onNewProfile (index.js.js, racine, jamais nettoyé de la prod) — portée ici pour
-// pouvoir enfin supprimer ce doublon.
-exports.notifyNewProfile = onDocumentCreated(
-  { document: "profiles/{name}", timeoutSeconds: 30 },
-  async (event) => {
-    const newDriverName = event.params.name;
-    const adminSnap = await db.collection("profiles").where("email", "==", ADMIN_EMAIL).limit(1).get();
-    if (adminSnap.empty) return;
-    const adminName = adminSnap.docs[0].id;
-    if (adminName === newDriverName) return;
+// Prévient l'admin à chaque nouvelle inscription de chauffeur. Déclenchée par la création
+// du compte Firebase Auth et non plus par celle de la fiche "profiles" : l'écriture de la
+// fiche peut échouer sans bruit (nom déjà pris…), et l'admin n'était alors jamais prévenu.
+exports.notifyNewSignup = functionsV1
+  .region("europe-west1")
+  .runWith({ timeoutSeconds: 60 })
+  .auth.user()
+  .onCreate(async (user) => {
+    if (user.email === ADMIN_EMAIL) return;
+    // signUp() renseigne le nom juste après la création du compte, et supprime le compte
+    // si la licence est déjà prise : on attend un peu puis on relit le compte.
+    await sleep(10 * 1000);
+    let fresh;
+    try {
+      fresh = await admin.auth().getUser(user.uid);
+    } catch (e) {
+      console.log(`notifyNewSignup: compte ${user.uid} supprimé entre-temps, pas de notification.`);
+      return;
+    }
+    const who = fresh.displayName || fresh.email || "Un chauffeur";
 
-    const entries = await tokensFor([adminName]);
+    const adminSnap = await db.collection("profiles").where("email", "==", ADMIN_EMAIL).limit(1).get();
+    if (adminSnap.empty) {
+      console.log("notifyNewSignup: fiche admin introuvable, notification impossible.");
+      return;
+    }
+    const entries = await tokensFor([adminSnap.docs[0].id]);
     await sendTo(entries, {
       notification: {
         title: "🆕 Nouveau chauffeur inscrit",
-        body: `${newDriverName} vient de créer un compte sur RoulePartner.`,
+        body: `${who}${fresh.email && fresh.displayName ? ` (${fresh.email})` : ""} vient de créer un compte sur RoulePartner.`,
       },
-      data: { rideId: `nouveau-chauffeur-${newDriverName}` },
+      data: { rideId: `nouveau-chauffeur-${user.uid}` },
     });
-  }
-);
+  });
 
 // Réservé à l'admin. Répare les profils dont le champ "email" est resté vide
 // (comptes créés avant que signUp() ne le sauvegarde) en le recopiant depuis
@@ -461,7 +476,6 @@ async function purgeDriverData(name) {
 
 // Automatique : dès qu'un compte est supprimé dans Firebase Auth, on efface ses données.
 // (Pas d'équivalent v2 pour cet événement, d'où la v1.)
-const functionsV1 = require("firebase-functions/v1");
 exports.cleanupDeletedUser = functionsV1.region("europe-west1").auth.user().onDelete(async (user) => {
   if (user.email === ADMIN_EMAIL) return;
   const names = new Set();

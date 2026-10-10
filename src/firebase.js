@@ -114,6 +114,26 @@ export async function signUp(email, password, displayName, licenseNumber, commun
   // dans les règles de sécurité Firestore (sinon le tout premier post échouerait).
   await cred.user.getIdToken(true);
 
+  // Réserve le nom : la fiche est créée en premier, et les règles Firestore n'autorisent
+  // que sa CRÉATION (un compte non confirmé ne peut pas écraser une fiche existante).
+  // Un refus veut donc dire que ce nom appartient déjà à un autre chauffeur.
+  try {
+    await setDoc(doc(profilesCol, displayName), {
+      email: cred.user.email, // forme normalisée par Firebase, comparée au jeton par les règles
+      licenseNumber: normalizedLicense,
+      commune,
+      banned: false,
+      createdAt: Date.now(),
+    });
+  } catch (e) {
+    console.error("signUp: écriture du profil refusée", e);
+    // On retire le nom du compte AVANT de le supprimer : cleanupDeletedUser purge la fiche
+    // portant le nom du compte supprimé, il ne doit pas toucher à celle de l'autre chauffeur.
+    await updateProfile(cred.user, { displayName: "" }).catch(() => {});
+    await cred.user.delete().catch(() => {});
+    throw new Error(e.code === "permission-denied" ? "name_taken" : "profile_failed");
+  }
+
   // Réserve le numéro de licence : les règles Firestore n'autorisent la création
   // de ce document que s'il n'existe pas déjà — un doublon est donc rejeté ici.
   try {
@@ -124,28 +144,12 @@ export async function signUp(email, password, displayName, licenseNumber, commun
     });
   } catch (e) {
     // Le numéro de licence est déjà utilisé par un autre compte : on annule
-    // proprement la création du compte pour ne pas laisser de compte orphelin.
+    // proprement la création du compte (cleanupDeletedUser efface la fiche créée juste avant).
     await cred.user.delete().catch(() => {});
     throw new Error("license_taken");
   }
 
-  // Le mail de confirmation part AVANT l'écriture de la fiche : si celle-ci échoue,
-  // le chauffeur a quand même son lien, sans devoir cliquer sur « Renvoyer l'email ».
   await sendEmailVerification(cred.user);
-
-  try {
-    await setDoc(doc(profilesCol, displayName), {
-      email: cred.user.email, // forme normalisée par Firebase, comparée au jeton par les règles
-      licenseNumber: normalizedLicense,
-      commune,
-      banned: false,
-      createdAt: Date.now(),
-    });
-  } catch (e) {
-    // Le compte existe déjà et le mail est parti : ne pas afficher « Échec de
-    // l'inscription » pour autant. L'admin peut compléter la fiche ensuite.
-    console.error("signUp: écriture du profil refusée", e);
-  }
   return cred.user;
 }
 
