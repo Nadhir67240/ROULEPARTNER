@@ -74,16 +74,24 @@ async function loadPositions() {
   return positions;
 }
 
+// Un chauffeur a un jeton par appareil (map "tokens", écrite par registerFcmToken) ; le
+// champ "token" unique est l'ancien format, encore présent chez ceux qui n'ont pas rouvert l'appli.
+function tokensOf(data) {
+  const set = new Set(Object.keys((data && data.tokens) || {}));
+  if (data && data.token) set.add(data.token);
+  return [...set];
+}
+
 async function tokensFor(driverNames) {
   const out = [];
   await Promise.all(
     driverNames.map(async (name) => {
       const doc = await db.collection("fcmTokens").doc(name).get();
-      const token = doc.exists ? doc.data().token : null;
+      const tokens = doc.exists ? tokensOf(doc.data()) : [];
       // Log temporaire pour diagnostiquer les push qui n'arrivent jamais : permet de
       // voir si le token existe côté serveur avant même d'essayer l'envoi FCM.
-      console.log(`tokensFor: "${name}" -> doc exists=${doc.exists}, token=${token ? "present" : "absent"}`);
-      if (token) out.push({ name, token });
+      console.log(`tokensFor: "${name}" -> doc exists=${doc.exists}, ${tokens.length} appareil(s)`);
+      tokens.forEach((token) => out.push({ name, token }));
     })
   );
   return out;
@@ -98,8 +106,7 @@ async function allTokensExcept(excludedNames) {
   const out = [];
   snap.forEach((d) => {
     if (excludedNames.includes(d.id)) return;
-    const token = d.data().token;
-    if (token) out.push({ name: d.id, token });
+    tokensOf(d.data()).forEach((token) => out.push({ name: d.id, token }));
   });
   return out;
 }
@@ -147,11 +154,21 @@ async function sendTo(entries, payload) {
       code === "messaging/registration-token-not-registered" ||
       code === "messaging/invalid-registration-token"
     ) {
-      stale.push(entries[i].name);
+      stale.push(entries[i]);
     }
   });
+  // On ne retire que le jeton mort : les autres appareils du chauffeur restent abonnés.
   await Promise.all(
-    stale.map((name) => db.collection("fcmTokens").doc(name).delete().catch(() => {}))
+    stale.map(async ({ name, token }) => {
+      const ref = db.collection("fcmTokens").doc(name);
+      try {
+        const snap = await ref.get();
+        if (!snap.exists) return;
+        const args = [new admin.firestore.FieldPath("tokens", token), admin.firestore.FieldValue.delete()];
+        if (snap.data().token === token) args.push("token", admin.firestore.FieldValue.delete());
+        await ref.update(...args);
+      } catch {}
+    })
   );
 }
 

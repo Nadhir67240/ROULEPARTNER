@@ -20,6 +20,8 @@ import {
   enableNetwork,
   connectFirestoreEmulator,
   serverTimestamp,
+  deleteField,
+  FieldPath,
 } from "firebase/firestore";
 import {
   getAuth,
@@ -160,6 +162,7 @@ export async function logIn(email, password) {
 }
 
 export async function logOut() {
+  await unregisterFcmToken();
   await signOut(auth);
 }
 
@@ -395,6 +398,21 @@ const VAPID_KEY = "BJM083fCjLvVEZNnP2NmsQM146hHmdKNIpZTIMCFx9IXScg1qJH4gWFgiEUPd
 // Enregistre ce téléphone pour recevoir de vraies notifications même appli
 // fermée (via un petit programme serveur — Cloud Function). Ne fait rien si
 // le navigateur ne supporte pas cette fonctionnalité (ex: anciens navigateurs).
+// Jeton de CET appareil, retiré à la déconnexion : un ordinateur partagé ou un
+// compte test ne doit plus recevoir les notifs du chauffeur qui s'est déconnecté.
+let registeredFcm = null;
+
+async function unregisterFcmToken() {
+  if (!registeredFcm) return;
+  const { driverName, token } = registeredFcm;
+  registeredFcm = null;
+  try {
+    await updateDoc(doc(fcmTokensCol, driverName), new FieldPath("tokens", token), deleteField());
+  } catch (e) {
+    console.warn("unregisterFcmToken:", e);
+  }
+}
+
 export async function registerFcmToken(driverName) {
   try {
     const supported = await isSupported();
@@ -403,7 +421,15 @@ export async function registerFcmToken(driverName) {
     const messaging = getMessaging(app);
     const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
     if (token) {
-      await setDoc(doc(fcmTokensCol, driverName), { token, updatedAt: Date.now() }, { merge: true });
+      // Un jeton PAR APPAREIL (map tokens) : avec un seul champ "token", le dernier
+      // appareil ouvert (ex. l'ordinateur) écrasait celui du téléphone, qui ne
+      // recevait plus aucune notif.
+      await setDoc(
+        doc(fcmTokensCol, driverName),
+        { tokens: { [token]: Date.now() }, updatedAt: Date.now() },
+        { merge: true }
+      );
+      registeredFcm = { driverName, token };
     }
     return token;
   } catch (e) {
