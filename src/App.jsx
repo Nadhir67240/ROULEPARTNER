@@ -101,6 +101,15 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  // Renvoi du mail de confirmation : message de succès distinct de authError (affiché
+  // en rouge) et délai d'attente, car Firebase refuse un renvoi trop rapproché.
+  const [verifyNotice, setVerifyNotice] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
   const [splashSeen, setSplashSeen] = useState(() => {
     try { return sessionStorage.getItem("rp_splash_seen") === "1"; } catch { return false; }
   });
@@ -1761,12 +1770,14 @@ export default function App() {
             <strong> courrier indésirable</strong> : il y arrive souvent. Pense à le marquer comme « non spam ».
           </p>
           {authError && <p style={{ color: "#E5484D", fontSize: 13 }}>{authError}</p>}
+          {verifyNotice && <p style={{ color: "#30A46C", fontSize: 13 }}>{verifyNotice}</p>}
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20 }}>
             <button
               type="button"
               style={styles.btnPrimary}
               onClick={async () => {
                 setAuthError("");
+                setVerifyNotice("");
                 const refreshed = await reloadUser();
                 if (refreshed && !refreshed.emailVerified) {
                   setAuthError("Toujours pas confirmé — vérifie ta boîte mail (et les spams).");
@@ -1778,18 +1789,32 @@ export default function App() {
             </button>
             <button
               type="button"
-              style={styles.btnGhost}
+              style={{ ...styles.btnGhost, opacity: resendCooldown > 0 ? 0.5 : 1 }}
+              disabled={resendCooldown > 0}
               onClick={async () => {
                 setAuthError("");
+                setVerifyNotice("");
                 try {
                   await resendVerificationEmail();
-                  setAuthError("Email renvoyé.");
+                  setVerifyNotice(`Email renvoyé à ${user.email}. Regarde aussi dans les spams.`);
+                  setResendCooldown(60);
                 } catch (e) {
-                  setAuthError("Échec de l'envoi, réessaie dans un instant.");
+                  console.error("resendVerificationEmail", e);
+                  if (e.code === "auth/too-many-requests") {
+                    // Firebase bloque les renvois rapprochés (le mail de l'inscription compte).
+                    setAuthError("Un email vient déjà de partir. Attends une minute avant d'en redemander un.");
+                    setResendCooldown(60);
+                  } else if (e.code === "auth/network-request-failed") {
+                    setAuthError("Pas de connexion internet. Vérifie ton réseau et réessaie.");
+                  } else if (e.code === "auth/user-token-expired" || e.code === "auth/requires-recent-login") {
+                    setAuthError("Ta session a expiré : déconnecte-toi, reconnecte-toi, puis réessaie.");
+                  } else {
+                    setAuthError(`Échec de l'envoi (${e.code || "erreur inconnue"}). Réessaie dans un instant.`);
+                  }
                 }
               }}
             >
-              Renvoyer l'email
+              {resendCooldown > 0 ? `Renvoyer l'email (${resendCooldown} s)` : "Renvoyer l'email"}
             </button>
             <button type="button" style={styles.btnGhost} onClick={() => logOut()}>
               Se déconnecter
