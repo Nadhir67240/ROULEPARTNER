@@ -355,7 +355,7 @@ export default function App() {
   // page. Ce listener rattrape ce cas en affichant quand même la notification.
   useEffect(() => {
     if (!driverName) return;
-    listenForegroundMessages((payload) => {
+    return listenForegroundMessages((payload) => {
       if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
       const n = payload.notification || {};
       const d = payload.data || {};

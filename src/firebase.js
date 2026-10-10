@@ -426,7 +426,9 @@ export async function registerFcmToken(driverName) {
       // recevait plus aucune notif.
       await setDoc(
         doc(fcmTokensCol, driverName),
-        { tokens: { [token]: Date.now() }, updatedAt: Date.now() },
+        // deleteField : retire l'ancien champ "token" unique, qui pointait vers un autre
+        // appareil et faisait recevoir la notif en double.
+        { tokens: { [token]: Date.now() }, token: deleteField(), updatedAt: Date.now() },
         { merge: true }
       );
       registeredFcm = { driverName, token };
@@ -444,12 +446,19 @@ export async function registerFcmToken(driverName) {
 // de passer par le service worker, et sans ce listener rien ne s'affiche —
 // c'est ce qui faisait "disparaître" les notifs de prise/départ/fin de course
 // pendant que le chauffeur avait l'appli sous les yeux.
+// Renvoie de quoi retirer le listener : sans ça, chaque changement de compte en
+// ajoutait un de plus et la même notif s'affichait 2, 3 fois.
 export function listenForegroundMessages(onPayload) {
+  let unsub = null;
+  let cancelled = false;
   isSupported().then((supported) => {
-    if (!supported) return;
-    const messaging = getMessaging(app);
-    onMessage(messaging, onPayload);
+    if (!supported || cancelled) return;
+    unsub = onMessage(getMessaging(app), onPayload);
   });
+  return () => {
+    cancelled = true;
+    if (unsub) unsub();
+  };
 }
 
 // Envoie un email de confirmation à la NOUVELLE adresse — le changement ne
