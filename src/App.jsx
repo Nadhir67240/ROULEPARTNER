@@ -89,6 +89,21 @@ function chatListTime(ts) {
   return label === "Hier" ? "Hier" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 }
 
+// Onglet de la barre du bas (mobile) : icône dans une pastille, colorée quand l'onglet est actif.
+function BottomNavItem({ icon: Icon, label, active, badge, onClick }) {
+  return (
+    <button onClick={onClick} className="rp-nav-item" style={styles.bottomNavBtn} aria-current={active ? "page" : undefined}>
+      <span style={{ ...styles.bottomNavIcon, ...(active ? styles.bottomNavIconActive : null) }}>
+        <Icon size={21} strokeWidth={active ? 2.4 : 2} />
+        {badge > 0 && <span style={styles.navBadge}>{badge > 9 ? "9+" : badge}</span>}
+      </span>
+      <span style={{ ...styles.bottomNavLabel, color: active ? "var(--accent-text)" : "var(--text-muted)", fontWeight: active ? 800 : 600 }}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -2140,9 +2155,13 @@ export default function App() {
         .rp-fab-floating { display: none !important; }
         @media (max-width: 720px) {
           .rp-bottom-nav { display: flex; }
-          .rp-bottom-spacer { height: 78px; }
+          .rp-bottom-spacer { height: 80px; }
           .rp-fab-floating { display: flex !important; }
         }
+        .rp-nav-item { -webkit-tap-highlight-color: transparent; transition: transform 0.12s ease; }
+        .rp-nav-item:active { transform: scale(0.92); }
+        .rp-fab-floating { -webkit-tap-highlight-color: transparent; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+        .rp-fab-floating:active { transform: translateX(-50%) scale(0.92) !important; }
       `}</style>
 
       {/* Alerte course prioritaire — s'affiche par-dessus n'importe quel écran
@@ -3576,36 +3595,12 @@ export default function App() {
       <div className="rp-bottom-spacer" />
 
       <nav className="rp-bottom-nav" style={styles.bottomNav}>
-        <button
-          onClick={() => setFilter("dispo")}
-          style={{ ...styles.bottomNavBtn, color: filter === "dispo" ? "var(--accent-text)" : "var(--text-muted)", position: "relative" }}
-        >
-          <Home size={22} />
-          {newRidesBadge > 0 && (
-            <span style={styles.navBadge}>{newRidesBadge > 9 ? "9+" : newRidesBadge}</span>
-          )}
-          <span style={styles.bottomNavLabel}>Accueil</span>
-        </button>
-        <button
-          onClick={() => setShowMyCoursesPanel(true)}
-          style={{ ...styles.bottomNavBtn, color: "var(--text-muted)" }}
-        >
-          <Car size={22} />
-          <span style={styles.bottomNavLabel}>Courses</span>
-        </button>
+        <BottomNavItem icon={Home} label="Accueil" active={filter === "dispo"} badge={newRidesBadge} onClick={() => setFilter("dispo")} />
+        <BottomNavItem icon={Car} label="Courses" onClick={() => setShowMyCoursesPanel(true)} />
         {/* Emplacement réservé au bouton + flottant, pour qu'il ne recouvre aucun onglet. */}
         <div style={styles.bottomNavFabSlot} aria-hidden="true" />
-        <button onClick={() => setShowMessagesPanel(true)} style={{ ...styles.bottomNavBtn, color: "var(--text-muted)", position: "relative" }}>
-          <MessageCircle size={22} />
-          {totalUnreadMessages > 0 && (
-            <span style={styles.navBadge}>{totalUnreadMessages > 9 ? "9+" : totalUnreadMessages}</span>
-          )}
-          <span style={styles.bottomNavLabel}>Messages</span>
-        </button>
-        <button onClick={() => setShowAccountPanel(true)} style={{ ...styles.bottomNavBtn, color: "var(--text-muted)" }}>
-          <User size={22} />
-          <span style={styles.bottomNavLabel}>Compte</span>
-        </button>
+        <BottomNavItem icon={MessageCircle} label="Messages" badge={totalUnreadMessages} onClick={() => setShowMessagesPanel(true)} />
+        <BottomNavItem icon={User} label="Compte" onClick={() => setShowAccountPanel(true)} />
       </nav>
       <button
         onClick={() => {
