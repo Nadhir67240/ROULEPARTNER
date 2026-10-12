@@ -275,6 +275,16 @@ await adminSet("a4", sent(["Demandeur"]));
 await expect("posteur met à la corbeille une course envoyée sans réponse", true, () =>
   updateDoc(doc(poster.db, "rides/a4"), { deleted: true, deletedBy: "Poster", deletedAt: Date.now() }));
 
+// --- Groupes de chauffeurs (driverGroups/{nom}) : privés à leur propriétaire ---
+const grp = { groups: [{ id: "g1", name: "Équipe", members: ["Demandeur", "Autre"] }], updatedAt: Date.now() };
+await expect("chauffeur enregistre ses groupes", true, () => setDoc(doc(poster.db, "driverGroups/Poster"), grp));
+await expect("chauffeur relit ses groupes", true, () => getDoc(doc(poster.db, "driverGroups/Poster")));
+await expect("un autre chauffeur lit ses groupes", false, () => getDoc(doc(other.db, "driverGroups/Poster")));
+await expect("un autre chauffeur modifie ses groupes", false, () => setDoc(doc(other.db, "driverGroups/Poster"), grp));
+await expect("chauffeur ajoute un champ non prévu", false, () =>
+  setDoc(doc(poster.db, "driverGroups/Poster"), { ...grp, autre: 1 }));
+await expect("admin lit les groupes d'un chauffeur", true, () => getDoc(doc(admin.db, "driverGroups/Poster")));
+
 // --- Fiche profil à l'inscription (email pas encore confirmé) ---
 const nouveau = await makeUser("Nouveau", { verified: false });
 const fiche = (over) => ({ email: nouveau.email, licenseNumber: "LIC1", commune: "Strasbourg", banned: false, createdAt: Date.now(), ...over });

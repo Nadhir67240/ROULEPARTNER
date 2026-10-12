@@ -94,6 +94,8 @@ const profilesCol = collection(db, "profiles");
 const messagesCol = collection(db, "messages");
 const licensesCol = collection(db, "licenses");
 const fcmTokensCol = collection(db, "fcmTokens");
+// Groupes de chauffeurs propres à chacun (driverGroups/{nom}) : lisibles par lui seul.
+const driverGroupsCol = collection(db, "driverGroups");
 
 // --- Authentification ---
 export function watchAuthState(callback) {
@@ -420,6 +422,22 @@ export async function ensureOwnProfile(user) {
     createdAt: Date.parse(user.metadata?.creationTime) || Date.now(),
   });
   return true;
+}
+
+// --- Groupes de chauffeurs (« ceux avec qui je travaille ») ---
+// Un document par chauffeur : { groups: [{ id, name, members: [noms] }] }.
+export function listenMyGroups(driverName, callback) {
+  if (!driverName) {
+    callback([]);
+    return () => {};
+  }
+  return onSnapshot(doc(driverGroupsCol, driverName), (snap) => {
+    callback(snap.exists() ? snap.data().groups || [] : []);
+  }, () => callback([]));
+}
+
+export async function saveMyGroups(driverName, groups) {
+  await setDoc(doc(driverGroupsCol, driverName), { groups, updatedAt: Date.now() });
 }
 
 export async function setDriverPhone(name, phone) {

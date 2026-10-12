@@ -15,7 +15,7 @@ import {
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
   setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth, ensureOwnProfile,
-  isAssignedRide, rideAssignees, rideAssignRefused, rideAssigneesPending, refuseAssignedRide, releaseAssignedRide, sendRideToDrivers,
+  isAssignedRide, rideAssignees, rideAssignRefused, rideAssigneesPending, refuseAssignedRide, releaseAssignedRide, sendRideToDrivers, listenMyGroups, saveMyGroups,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
@@ -145,6 +145,9 @@ export default function App() {
   // Fenêtre de choix des chauffeurs : { sel, onDone, allLabel } pendant qu'elle est ouverte.
   const [driverPicker, setDriverPicker] = useState(null);
   const [driverSearch, setDriverSearch] = useState("");
+  // Mes groupes de chauffeurs ([{ id, name, members }]) et nom du groupe en cours de création.
+  const [myGroups, setMyGroups] = useState([]);
+  const [groupNameDraft, setGroupNameDraft] = useState(null);
   const [myRides, setMyRides] = useState([]); // historique complet du chauffeur (listenMyRides)
   const [positions, setPositions] = useState({});
   const [profiles, setProfiles] = useState({});
@@ -374,6 +377,14 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverName]);
+
+  useEffect(() => {
+    if (!user?.emailVerified || !driverName) {
+      setMyGroups([]);
+      return undefined;
+    }
+    return listenMyGroups(driverName, setMyGroups);
+  }, [user, driverName]);
 
   // Recrée la fiche des anciens comptes qui n'en ont pas (voir ensureOwnProfile).
   useEffect(() => {
@@ -1456,6 +1467,36 @@ export default function App() {
     .filter((n) => n !== driverName && !profiles[n]?.banned && !profiles[n]?.deleted)
     .sort((a, b) => (isDriverOnDuty(b) - isDriverOnDuty(a)) || a.localeCompare(b, "fr"));
 
+  // --- Groupes de chauffeurs ---
+  // Membres encore valables (un chauffeur supprimé ou banni disparaît du groupe à l'affichage).
+  const groupMembers = (g) => (g.members || []).filter((n) => assignableDrivers.includes(n));
+  const saveGroups = async (next) => {
+    try {
+      await saveMyGroups(driverName, next);
+    } catch (e) {
+      setError("Échec de l'enregistrement du groupe.");
+    }
+  };
+  const createGroup = (name, members) =>
+    saveGroups([...myGroups, { id: uid(), name: name.trim(), members }]);
+  const replaceGroupMembers = (id, members) =>
+    saveGroups(myGroups.map((g) => (g.id === id ? { ...g, members } : g)));
+  const deleteGroup = (id) => saveGroups(myGroups.filter((g) => g.id !== id));
+  // Un groupe est « actif » quand tous ses membres sont dans la sélection ; le toucher les
+  // ajoute tous, ou les retire tous s'il était déjà actif.
+  const groupActive = (g, selected) => groupMembers(g).length > 0 && groupMembers(g).every((n) => selected.includes(n));
+  const toggleGroup = (g, selected) => {
+    const members = groupMembers(g);
+    return groupActive(g, selected)
+      ? selected.filter((n) => !members.includes(n))
+      : [...selected, ...members.filter((n) => !selected.includes(n))];
+  };
+  const groupChip = (active) => ({
+    display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 700, cursor: "pointer",
+    padding: "7px 12px", borderRadius: 999, border: `1.5px solid ${active ? "#FFB43A" : "var(--border-outline)"}`,
+    background: active ? "#FFB43A" : "transparent", color: active ? "#1A1206" : "var(--text-tertiary)",
+  });
+
   // Champ « Envoyer à » : résumé du choix + petites étiquettes retirables. Le choix lui-même
   // se fait dans une fenêtre avec recherche et liste à cocher (driverPicker), lisible même
   // avec des dizaines de chauffeurs. allLabel : libellé quand personne n'est choisi
@@ -1464,6 +1505,7 @@ export default function App() {
     const open = (e) => {
       e.stopPropagation();
       setDriverSearch("");
+      setGroupNameDraft(null);
       setDriverPicker({ sel: selected, onDone: onChange, allLabel });
     };
     const summary = selected.length === 0
@@ -1482,6 +1524,18 @@ export default function App() {
           </span>
           <ChevronRight size={16} color="var(--text-muted)" style={{ flexShrink: 0 }} />
         </button>
+        {myGroups.some((g) => groupMembers(g).length > 0) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {myGroups.filter((g) => groupMembers(g).length > 0).map((g) => {
+              const active = groupActive(g, selected);
+              return (
+                <button type="button" key={g.id} onClick={() => onChange(toggleGroup(g, selected))} style={groupChip(active)}>
+                  {active ? <Check size={13} /> : <Users size={13} />} {g.name} ({groupMembers(g).length})
+                </button>
+              );
+            })}
+          </div>
+        )}
         {selected.length > 2 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {selected.map((n) => (
@@ -2434,6 +2488,63 @@ export default function App() {
                 value={driverSearch}
                 onChange={(e) => setDriverSearch(e.target.value)}
               />
+              {!q && myGroups.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: "var(--text-muted)", marginBottom: 6 }}>MES GROUPES</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {myGroups.map((g) => {
+                      const members = groupMembers(g);
+                      const active = groupActive(g, sel);
+                      return (
+                        <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <button type="button" disabled={!members.length} onClick={() => setSel(toggleGroup(g, sel))}
+                            style={{ ...groupChip(active), flex: 1, minWidth: 0, justifyContent: "flex-start", opacity: members.length ? 1 : 0.5 }}>
+                            {active ? <Check size={13} /> : <Users size={13} />}
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
+                            <span style={{ fontWeight: 500, opacity: 0.8 }}>({members.length})</span>
+                          </button>
+                          {sel.length > 0 && !active && (
+                            <button type="button" title="Remplacer les membres par la sélection actuelle"
+                              onClick={() => { if (window.confirm(`Remplacer les membres de « ${g.name} » par les ${sel.length} chauffeurs cochés ?`)) replaceGroupMembers(g.id, sel); }}
+                              style={styles.iconBtn}>
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          <button type="button" title="Supprimer le groupe"
+                            onClick={() => { if (window.confirm(`Supprimer le groupe « ${g.name} » ?`)) deleteGroup(g.id); }}
+                            style={styles.iconBtn}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {sel.length > 0 && (groupNameDraft === null ? (
+                <button type="button" onClick={() => setGroupNameDraft("")}
+                  style={{ background: "none", border: "1.5px dashed var(--border-outline)", borderRadius: 10, padding: "9px 12px", marginBottom: 10, cursor: "pointer", color: "var(--accent-text)", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  <Plus size={14} /> Créer un groupe avec ces {sel.length} chauffeur{sel.length > 1 ? "s" : ""}
+                </button>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!groupNameDraft.trim()) return;
+                    createGroup(groupNameDraft, sel);
+                    setGroupNameDraft(null);
+                  }}
+                  style={{ display: "flex", gap: 6, marginBottom: 10 }}
+                >
+                  <input autoFocus maxLength={40} style={{ ...styles.input, flex: 1, minWidth: 0, minHeight: 44, padding: "10px 12px", fontSize: 15 }}
+                    placeholder="Nom du groupe (ex : Équipe Strasbourg)" value={groupNameDraft}
+                    onChange={(e) => setGroupNameDraft(e.target.value)} />
+                  <button type="submit" disabled={!groupNameDraft.trim()} style={{ ...styles.btnClaim, opacity: groupNameDraft.trim() ? 1 : 0.5 }}>
+                    <Check size={14} />
+                  </button>
+                  <button type="button" onClick={() => setGroupNameDraft(null)} style={styles.iconBtn}><X size={14} /></button>
+                </form>
+              ))}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "var(--text-muted)", marginBottom: 6 }}>
                 <span>{q ? `${shown.length} résultat${shown.length > 1 ? "s" : ""}` : "Les chauffeurs en service d'abord"}</span>
                 {sel.length > 0 && (

@@ -48,7 +48,9 @@ that `App.jsx` calls directly — there is no separate data layer/store.
 **Firestore collections** (all accessed via `src/firebase.js`): `rides`, `positions`
 (live driver GPS, keyed by driver name), `profiles` (keyed by driver display name),
 `messages` (per-ride chat), `licenses` (taxi license numbers reserved as doc IDs to enforce
-uniqueness at signup), `fcmTokens`. Driver **display name**, not UID, is used as the primary
+uniqueness at signup), `fcmTokens`, `driverGroups` (each driver's private named groups of
+drivers, `{ groups: [{ id, name, members }] }`, readable only by its owner; used as shortcuts in
+the "Envoyer à" picker). Driver **display name**, not UID, is used as the primary
 key/identity across collections (profiles, positions, chat participants, ban/delete logic).
 
 Firestore security rules live in `firestore.rules` (referenced by `firebase.json`) and are

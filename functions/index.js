@@ -597,6 +597,7 @@ async function purgeDriverData(name) {
   batch.delete(db.collection("profiles").doc(name));
   batch.delete(db.collection("positions").doc(name));
   batch.delete(db.collection("fcmTokens").doc(name));
+  batch.delete(db.collection("driverGroups").doc(name));
   const licenses = await db.collection("licenses").where("owner", "==", name).get();
   licenses.forEach((d) => batch.delete(d.ref));
   await batch.commit();

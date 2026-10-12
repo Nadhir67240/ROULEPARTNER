@@ -242,6 +242,15 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isVerified() && resource.data.owner == request.auth.token.name);
     }
 
+    // Groupes de chauffeurs de chacun : personne d'autre ne voit qui est dans ses groupes.
+    match /driverGroups/{name} {
+      allow read: if isAdmin() || isMe(name);
+      allow write: if isAdmin() || (isMe(name) && !isBanned()
+        && request.resource.data.keys().hasOnly(['groups', 'updatedAt'])
+        && request.resource.data.groups is list
+        && request.resource.data.groups.size() <= 50);
+    }
+
     match /fcmTokens/{name} {
       allow read: if false;
       allow write: if isAdmin() || (isMe(name) && !isBanned());
