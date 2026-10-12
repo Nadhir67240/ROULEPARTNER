@@ -275,6 +275,33 @@ await adminSet("a4", sent(["Demandeur"]));
 await expect("posteur met à la corbeille une course envoyée sans réponse", true, () =>
   updateDoc(doc(poster.db, "rides/a4"), { deleted: true, deletedBy: "Poster", deletedAt: Date.now() }));
 
+// --- Patient (données de santé) : jamais dans la fiche publique, seulement dans prive/patient ---
+await expect("posteur publie une course avec le patient dans la fiche", false, () =>
+  setDoc(doc(poster.db, "rides/p1"), newRide({ patient: "Jean Dupont" })));
+await expect("ancienne appli : publie avec patient vide dans la fiche", true, () =>
+  setDoc(doc(poster.db, "rides/p0"), newRide({ patient: "", patientTel: "" })));
+await expect("posteur publie une course + fiche patient privée (même lot)", true, () => {
+  const b = writeBatch(poster.db);
+  b.set(doc(poster.db, "rides/p2"), newRide({ hasPatient: true, patientAt: Date.now() }));
+  b.set(doc(poster.db, "rides/p2/prive/patient"), { patient: "Jean Dupont", patientTel: "0600000000" });
+  return b.commit();
+});
+await expect("autre chauffeur lit la fiche patient", false, () => getDoc(doc(other.db, "rides/p2/prive/patient")));
+await expect("posteur lit la fiche patient", true, () => getDoc(doc(poster.db, "rides/p2/prive/patient")));
+await expect("posteur ajoute le patient dans la fiche d'une course", false, () =>
+  updateDoc(doc(poster.db, "rides/p2"), { patientTel: "0600000000" }));
+await adminSet("p4", baseRide({ status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: new Date(), hasPatient: true }));
+await adminSet("p4/prive/patient", { patient: "Jean Dupont", patientTel: "0600000000" });
+await expect("demandeur lit la fiche patient une fois la course demandée", true, () => getDoc(doc(req.db, "rides/p4/prive/patient")));
+await expect("autre chauffeur lit la fiche patient d'une course demandée", false, () => getDoc(doc(other.db, "rides/p4/prive/patient")));
+await adminSet("p3", baseRide({ patient: "Ancien Patient", patientTel: "0611111111" }));
+await expect("posteur migre le patient d'une ancienne course vers la fiche privée", true, () => {
+  const b = writeBatch(poster.db);
+  b.set(doc(poster.db, "rides/p3/prive/patient"), { patient: "Ancien Patient", patientTel: "0611111111" });
+  b.update(doc(poster.db, "rides/p3"), { patient: deleteField(), patientTel: deleteField(), hasPatient: true, patientAt: Date.now() });
+  return b.commit();
+});
+
 // --- Groupes de chauffeurs (driverGroups/{nom}) : privés à leur propriétaire ---
 const grp = { groups: [{ id: "g1", name: "Équipe", members: ["Demandeur", "Autre"] }], updatedAt: Date.now() };
 await expect("chauffeur enregistre ses groupes", true, () => setDoc(doc(poster.db, "driverGroups/Poster"), grp));

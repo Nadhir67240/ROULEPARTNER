@@ -9,7 +9,7 @@ import {
   Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
 } from "lucide-react";
 import {
-  listenRides, listenMyRides, addRide, updateRide, deleteRide, archiveRide, restoreRide, claimRide, getRideAttachment,
+  listenRides, listenMyRides, addRide, updateRide, deleteRide, archiveRide, restoreRide, claimRide, getRideAttachment, getRidePatient, migrateRidePatient, rideLeaksPatient,
   listenPositions, setDriverPosition, clearDriverPosition,
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
@@ -50,12 +50,17 @@ const TAKER_WATCHED_FIELDS = [
   ["patientTel", "Téléphone patient"],
   ["notes", "Notes"],
 ];
+// Ces changements sont enregistrés dans la fiche de la course, lisible par tous : pour le
+// patient (données de santé) on note seulement qu'il a changé, sans les valeurs.
+const PRIVATE_WATCHED_FIELDS = new Set(["patient", "patientTel"]);
 function rideChangesForTaker(before, after) {
   const changes = [];
   for (const [field, label, fmt = (v) => v ?? ""] of TAKER_WATCHED_FIELDS) {
     const from = String(fmt(before[field]) || "");
     const to = String(fmt(after[field]) || "");
-    if (from !== to) changes.push({ field, label, from, to });
+    if (from === to) continue;
+    if (PRIVATE_WATCHED_FIELDS.has(field)) changes.push({ field, label, from: "", to: to ? "modifié" : "retiré" });
+    else changes.push({ field, label, from, to });
   }
   if ((before.photo || null) !== (after.photo || null)) changes.push({ field: "photo", label: "Photo du bon", from: "", to: after.photo ? "modifiée" : "retirée" });
   if ((before.document || null) !== (after.document || null)) changes.push({ field: "document", label: "PDF du bon", from: "", to: after.document ? "modifié" : "retiré" });
@@ -1383,9 +1388,12 @@ export default function App() {
   // Photo / PDF du bon d'une course, pour pré-remplir le formulaire (rangés à part dans la
   // base, sauf sur les anciennes courses où ils sont encore dans la fiche).
   const loadRideAttachment = async (r) => {
-    if (r.photo || r.document) return { photo: r.photo || null, document: r.document || null, documentName: r.documentName || "" };
+    // Patient : encore dans la fiche (anciennes courses) ou dans sa fiche privée.
+    const pat = r.patient || r.patientTel ? r : r.hasPatient ? await getRidePatient(r.id) : null;
+    const patient = { patient: pat?.patient || "", patientTel: pat?.patientTel || "" };
+    if (r.photo || r.document) return { ...patient, photo: r.photo || null, document: r.document || null, documentName: r.documentName || "" };
     const att = r.hasPhoto || r.hasDocument ? await getRideAttachment(r.id) : null;
-    return { photo: att?.photo || null, document: att?.document || null, documentName: att?.documentName || "" };
+    return { ...patient, photo: att?.photo || null, document: att?.document || null, documentName: att?.documentName || "" };
   };
 
   const startEdit = async (r) => {
@@ -1394,7 +1402,7 @@ export default function App() {
       att = await loadRideAttachment(r);
     } catch (e) {
       // Sans ça, enregistrer la modification effacerait la photo / le PDF existants.
-      setError("Impossible de charger le bon de transport de la course, réessaie.");
+      setError("Impossible de charger le bon de transport ou le patient de la course, réessaie.");
       return;
     }
     editOriginalRideRef.current = r;
@@ -1429,8 +1437,8 @@ export default function App() {
     // Le bon n'est recopié que pour qui a le droit de le voir (posteur, demandeur, preneur).
     const canSeeBon = [r.postedBy, r.takenBy, r.pendingBy].includes(driverName);
     const att = canSeeBon
-      ? await loadRideAttachment(r).catch(() => ({ photo: null, document: null, documentName: "" }))
-      : { photo: null, document: null, documentName: "" };
+      ? await loadRideAttachment(r).catch(() => ({ photo: null, document: null, documentName: "", patient: "", patientTel: "" }))
+      : { photo: null, document: null, documentName: "", patient: "", patientTel: "" };
     editOriginalTarifInputs.current = null;
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
@@ -2033,6 +2041,45 @@ export default function App() {
     });
     return [...byId.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [myRides, rides, driverName]);
+
+  // --- Patient (fiche privée rides/{id}/prive/patient) ---
+  // Lue seulement pour les courses où j'y ai droit (posteur, demandeur, preneur, admin), et
+  // relue quand le posteur la modifie (patientAt) ou que le preneur change.
+  const [patientById, setPatientById] = useState({});
+  const canSeePatient = (r) => isAdmin || [r.postedBy, r.takenBy, r.pendingBy].includes(driverName);
+  const patientKey = (r) => [r.patientAt || 0, r.takenBy || "", r.pendingBy || ""].join("|");
+  useEffect(() => {
+    const seen = new Set();
+    [...rides, ...myRidesAll].forEach((r) => {
+      if (seen.has(r.id)) return;
+      seen.add(r.id);
+      if (!r.hasPatient || !canSeePatient(r)) return;
+      const key = patientKey(r);
+      if (patientById[r.id]?.key === key) return;
+      setPatientById((m) => ({ ...m, [r.id]: { key, loading: true } }));
+      getRidePatient(r.id)
+        .then((p) => setPatientById((m) => ({ ...m, [r.id]: { key, patient: p?.patient || "", patientTel: p?.patientTel || "" } })))
+        .catch(() => setPatientById((m) => ({ ...m, [r.id]: { key, patient: "", patientTel: "" } })));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rides, myRidesAll, driverName, isAdmin]);
+  // Patient d'une course : encore dans la fiche (anciennes courses) ou chargé à part.
+  const patientOf = (r) => (r.patient || r.patientTel
+    ? { patient: r.patient || "", patientTel: r.patientTel || "" }
+    : patientById[r.id] || { patient: "", patientTel: "" });
+
+  // Anciennes courses avec le patient en clair dans la fiche (ou dans le bandeau « course
+  // modifiée ») : le posteur (ou l'admin) le range dans la fiche privée, une seule
+  // tentative par course et par session.
+  const migratedPatientIds = useRef(new Set());
+  useEffect(() => {
+    [...rides, ...myRidesAll, ...(isAdmin ? deletedRides : [])].forEach((r) => {
+      if (!rideLeaksPatient(r) || migratedPatientIds.current.has(r.id)) return;
+      if (!(isAdmin || (r.postedBy === driverName && !r.deleted))) return;
+      migratedPatientIds.current.add(r.id);
+      migrateRidePatient(r).catch(() => {});
+    });
+  }, [rides, myRidesAll, deletedRides, driverName, isAdmin]);
 
   const myTakenRides = myRidesAll
     .filter((r) => r.takenBy === driverName)
@@ -3830,14 +3877,14 @@ export default function App() {
                       ({r.calcDistanceKm} km {r.calcIsRoadDistance ? "réels (route)" : "à vol d'oiseau"})
                     </span>
                   )}
-                  {r.patient && <span style={styles.metaItem}>Patient : {r.patient}</span>}
-                  {r.patientTel && (
+                  {patientOf(r).patient && <span style={styles.metaItem}>Patient : {patientOf(r).patient}</span>}
+                  {patientOf(r).patientTel && (
                     <a
-                      href={`tel:${r.patientTel.replace(/\s/g, "")}`}
+                      href={`tel:${patientOf(r).patientTel.replace(/\s/g, "")}`}
                       onClick={(e) => e.stopPropagation()}
                       style={{ ...styles.metaItem, color: "var(--accent-text)", textDecoration: "underline" }}
                     >
-                      <Phone size={12} /> {r.patientTel}
+                      <Phone size={12} /> {patientOf(r).patientTel}
                     </a>
                   )}
                   {r._dist != null && (
@@ -4038,18 +4085,24 @@ export default function App() {
                     </span>
                   </div>
                 )}
-                {r.patient && (
+                {patientOf(r).patient && (
                   <div style={styles.modalRow}>
                     <User size={16} color="#8A9099" />
-                    <span>Patient : {r.patient}</span>
+                    <span>Patient : {patientOf(r).patient}</span>
                   </div>
                 )}
-                {r.patientTel && (
-                  <a href={`tel:${r.patientTel.replace(/\s/g, "")}`} style={styles.callBtn}>
+                {r.hasPatient && !canSeePatient(r) && (
+                  <div style={styles.modalRow}>
+                    <User size={16} color="#8A9099" />
+                    <span style={{ color: "var(--text-muted)" }}>Coordonnées du patient visibles une fois la course demandée</span>
+                  </div>
+                )}
+                {patientOf(r).patientTel && (
+                  <a href={`tel:${patientOf(r).patientTel.replace(/\s/g, "")}`} style={styles.callBtn}>
                     <span style={styles.callBtnIcon}><Phone size={16} color="#fff" /></span>
                     <span style={styles.callBtnText}>
                       <span style={styles.callBtnLabel}>Appeler le patient</span>
-                      <span style={styles.callBtnSub}>{r.patientTel}</span>
+                      <span style={styles.callBtnSub}>{patientOf(r).patientTel}</span>
                     </span>
                   </a>
                 )}

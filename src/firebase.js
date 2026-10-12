@@ -246,29 +246,86 @@ export async function getRideAttachment(rideId) {
   return snap.exists() ? snap.data() : null;
 }
 
+// Nom et téléphone du patient (données de santé) : rangés dans rides/{id}/prive/patient,
+// lisible seulement par le posteur, le demandeur, le preneur et l'admin (mêmes règles que
+// le bon). La fiche de la course ne garde que hasPatient et patientAt (date de la dernière
+// modification, pour que les autres appareils sachent quand le relire).
+function ridePatientRef(rideId) {
+  return doc(ridesCol, rideId, "prive", "patient");
+}
+
+export async function getRidePatient(rideId) {
+  const snap = await getDoc(ridePatientRef(rideId));
+  return snap.exists() ? snap.data() : null;
+}
+
+// Écrit (ou efface) la fiche patient dans le lot, et renvoie les champs à mettre sur la course.
+function writePatient(batch, rideId, patient, patientTel) {
+  const p = String(patient || "").trim(), tel = String(patientTel || "").trim();
+  if (p || tel) batch.set(ridePatientRef(rideId), { patient: p, patientTel: tel });
+  else batch.delete(ridePatientRef(rideId));
+  return { hasPatient: !!(p || tel), patientAt: Date.now() };
+}
+
 export async function addRide(ride) {
-  const { photo = null, document: pdf = null, documentName = "", ...data } = ride;
+  const { photo = null, document: pdf = null, documentName = "", patient = "", patientTel = "", ...data } = ride;
   const batch = writeBatch(db);
-  batch.set(doc(ridesCol, ride.id), { ...data, hasPhoto: !!photo, hasDocument: !!pdf });
+  const patientFields = writePatient(batch, ride.id, patient, patientTel);
+  batch.set(doc(ridesCol, ride.id), { ...data, ...patientFields, hasPhoto: !!photo, hasDocument: !!pdf });
   if (photo || pdf) batch.set(rideAttachmentRef(ride.id), { photo, document: pdf, documentName });
   await batch.commit();
 }
 
 export async function updateRide(id, patch) {
   const ref = doc(ridesCol, id);
-  if (!("photo" in patch) && !("document" in patch)) {
+  const hasBon = "photo" in patch || "document" in patch;
+  const hasPatientPatch = "patient" in patch || "patientTel" in patch;
+  if (!hasBon && !hasPatientPatch) {
     await updateDoc(ref, patch);
     return;
   }
-  const { photo = null, document: pdf = null, documentName = "", ...data } = patch;
+  const { photo = null, document: pdf = null, documentName = "", patient = "", patientTel = "", ...data } = patch;
   const batch = writeBatch(db);
-  // Les anciennes courses avaient la photo / le PDF directement dans la fiche : on les en retire.
-  batch.update(ref, {
-    ...data, hasPhoto: !!photo, hasDocument: !!pdf,
-    photo: deleteField(), document: deleteField(), documentName: deleteField(),
-  });
-  if (photo || pdf) batch.set(rideAttachmentRef(id), { photo, document: pdf, documentName });
-  else batch.delete(rideAttachmentRef(id));
+  const fields = { ...data };
+  if (hasPatientPatch) {
+    // Les anciennes courses avaient le patient directement dans la fiche : on l'en retire.
+    Object.assign(fields, writePatient(batch, id, patient, patientTel), { patient: deleteField(), patientTel: deleteField() });
+  }
+  if (hasBon) {
+    // Les anciennes courses avaient la photo / le PDF directement dans la fiche : on les en retire.
+    Object.assign(fields, {
+      hasPhoto: !!photo, hasDocument: !!pdf,
+      photo: deleteField(), document: deleteField(), documentName: deleteField(),
+    });
+    if (photo || pdf) batch.set(rideAttachmentRef(id), { photo, document: pdf, documentName });
+    else batch.delete(rideAttachmentRef(id));
+  }
+  batch.update(ref, fields);
+  await batch.commit();
+}
+
+// Bandeau « course modifiée » (dans la fiche, lisible par tous) qui contient encore les
+// anciennes / nouvelles valeurs du patient : à masquer.
+const isPrivateChange = (c) => c.field === "patient" || c.field === "patientTel";
+export const rideLeaksPatient = (r) =>
+  !!(r.patient || r.patientTel)
+  || !!r.modifiedAfterAccept?.changes?.some((c) => isPrivateChange(c) && (c.from || !["modifié", "retiré"].includes(c.to)));
+
+// Anciennes courses dont le patient est encore dans la fiche (lisible par tous) : le posteur
+// (ou l'admin) le déplace dans la fiche privée et le masque dans le bandeau de modification.
+export async function migrateRidePatient(ride) {
+  const batch = writeBatch(db);
+  const fields = ride.patient || ride.patientTel
+    ? { ...writePatient(batch, ride.id, ride.patient, ride.patientTel), patient: deleteField(), patientTel: deleteField() }
+    : {};
+  const modif = ride.modifiedAfterAccept;
+  if (modif?.changes?.some(isPrivateChange)) {
+    fields.modifiedAfterAccept = {
+      ...modif,
+      changes: modif.changes.map((c) => (isPrivateChange(c) ? { ...c, from: "", to: c.to ? "modifié" : "retiré" } : c)),
+    };
+  }
+  batch.update(doc(ridesCol, ride.id), fields);
   await batch.commit();
 }
 

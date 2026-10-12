@@ -153,13 +153,16 @@ service cloud.firestore {
       );
     }
 
-    // Photo / PDF du bon : jamais dans la fiche de la course (lisible par tous), seulement
-    // dans rides/{id}/prive/bon. Les anciennes courses qui les contiennent encore peuvent
-    // les garder tels quels ou les retirer, mais pas en ajouter de nouveaux.
+    // Photo / PDF du bon et nom / téléphone du patient : jamais dans la fiche de la course
+    // (lisible par tous), seulement dans rides/{id}/prive/bon et rides/{id}/prive/patient. Les
+    // anciennes courses qui les contiennent encore peuvent les garder tels quels ou les
+    // retirer, mais pas en ajouter de nouveaux.
     function noInlineAttachment() {
       return request.resource.data.get('photo', null) in [null, resource.data.get('photo', null)]
         && request.resource.data.get('document', null) in [null, resource.data.get('document', null)]
-        && request.resource.data.get('documentName', null) in [null, resource.data.get('documentName', null)];
+        && request.resource.data.get('documentName', null) in [null, resource.data.get('documentName', null)]
+        && request.resource.data.get('patient', null) in [null, '', resource.data.get('patient', null)]
+        && request.resource.data.get('patientTel', null) in [null, '', resource.data.get('patientTel', null)];
     }
 
     match /rides/{rideId} {
@@ -172,6 +175,9 @@ service cloud.firestore {
         && !('photo' in request.resource.data)
         && !('document' in request.resource.data)
         && !('documentName' in request.resource.data)
+        // Vide toléré : les anciennes versions de l'appli envoient encore patient: "".
+        && request.resource.data.get('patient', '') == ''
+        && request.resource.data.get('patientTel', '') == ''
       );
       // Effacement réel : admin uniquement (les chauffeurs passent par la corbeille).
       allow delete: if isAdmin();
@@ -193,8 +199,8 @@ service cloud.firestore {
         )
       );
 
-      // Photo / PDF du bon : lisibles seulement par le posteur, le chauffeur qui a demandé
-      // ou pris la course, et l'admin. Seul le posteur les écrit (getAfter : la course peut
+      // Photo / PDF du bon (prive/bon) et patient (prive/patient) : lisibles seulement par
+      // le posteur, le chauffeur qui a demandé ou pris la course, et l'admin. Seul le posteur les écrit (getAfter : la course peut
       // être créée dans le même lot d'écritures).
       match /prive/{docId} {
         function rideNow() {

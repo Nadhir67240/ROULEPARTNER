@@ -445,10 +445,16 @@ async function sendPickupReminders(now = Date.now()) {
     await doc.ref.update({ reminderSentAt: now });
     const minutes = Math.max(1, Math.round(lead / 60000));
     const entries = await tokensFor([r.takenBy]);
+    // Patient : fiche privée rides/{id}/prive/patient (anciennes courses : dans la fiche).
+    let patient = r.patient || "";
+    if (!patient && r.hasPatient) {
+      const p = await doc.ref.collection("prive").doc("patient").get().catch(() => null);
+      patient = p?.exists ? p.data().patient || "" : "";
+    }
     await sendTo(entries, {
       notification: {
         title: `⏰ Prise en charge dans ${minutes} min`,
-        body: `${r.heure} — ${r.depart} → ${r.arrivee}${r.patient ? ` (${r.patient})` : ""}`,
+        body: `${r.heure} — ${r.depart} → ${r.arrivee}${patient ? ` (${patient})` : ""}`,
       },
       data: {
         rideId: doc.id,

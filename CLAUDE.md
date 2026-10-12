@@ -88,6 +88,13 @@ priority window (`notifyNewRide` writes `priorityDrivers: []` and notifies only 
 back with the poster, who can resend it or publish it to everyone (clear `assignees`). Push
 notifications for these transitions: `handleAssignmentChange()` in `functions/index.js`.
 
+**Patient data is private**: a ride's patient name/phone (health data) never lives in the
+ride doc (readable by every verified driver) but in `rides/{id}/prive/patient` (same read rules
+as the transport voucher `prive/bon`: poster, requester, taker, admin); the ride only keeps
+`hasPatient` / `patientAt`. `addRide` / `updateRide` split it out; legacy rides with inline
+patient fields (or patient values in `modifiedAfterAccept`) are migrated client-side by the
+poster/admin (`migrateRidePatient`). Rules reject non-empty inline `patient` / `patientTel`.
+
 **Ride deletion is soft** (`deleted`/`deletedBy`/`deletedAt`, via `archiveRide`): archived rides
 are hidden everywhere and shown to the admin only, in the "Corbeille" view (restore or hard
 delete). A driver may archive only their own ride while it is still `disponible` and unclaimed;
