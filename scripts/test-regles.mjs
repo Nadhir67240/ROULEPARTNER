@@ -7,7 +7,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import {
   getFirestore, connectFirestoreEmulator, doc, setDoc, updateDoc, getDoc, deleteDoc, serverTimestamp, Timestamp,
-  writeBatch, deleteField,
+  writeBatch, deleteField, arrayUnion,
 } from "firebase/firestore";
 
 const PROJECT_ID = "demo-roulepartner";
@@ -218,41 +218,62 @@ await expect("admin met à la corbeille une course terminée", true, () =>
   updateDoc(doc(admin.db, "rides/d5"), archive(admin)));
 await expect("admin efface définitivement une course", true, () => deleteDoc(doc(admin.db, "rides/d5")));
 
-// --- Course envoyée à un chauffeur choisi (assignedTo) ---
-const assigned = (over) => baseRide({ assignedTo: "Demandeur", assignStatus: "envoyee", ...over });
-await expect("posteur publie une course envoyée à un chauffeur", true, () =>
-  setDoc(doc(poster.db, "rides/a0"), newRide({ assignedTo: "Demandeur", assignStatus: "envoyee" })));
-await adminSet("a1", assigned({}));
-await expect("un autre chauffeur demande une course envoyée à quelqu'un d'autre", false, () =>
-  updateDoc(doc(other.db, "rides/a1"), { status: "en_attente", pendingBy: "Autre", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
-await expect("un autre chauffeur l'accepte à sa place", false, () =>
-  updateDoc(doc(other.db, "rides/a1"), { status: "prise", takenBy: "Autre" }));
-await expect("le chauffeur choisi l'accepte en changeant le tarif", false, () =>
+// --- Course envoyée à des chauffeurs choisis (assignees) ---
+const third = await makeUser("Troisieme");
+const sent = (names, over) => baseRide({ assignees: names, assignRefused: [], priorityDrivers: [], priorityUntil: 0, ...over });
+await expect("posteur publie une course envoyée à deux chauffeurs", true, () =>
+  setDoc(doc(poster.db, "rides/a0"), newRide({ assignees: ["Demandeur", "Autre"], assignRefused: [] })));
+await adminSet("a1", sent(["Demandeur", "Autre"]));
+await expect("un chauffeur non choisi demande la course", false, () =>
+  updateDoc(doc(third.db, "rides/a1"), { status: "en_attente", pendingBy: "Troisieme", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
+await expect("un chauffeur non choisi l'accepte", false, () =>
+  updateDoc(doc(third.db, "rides/a1"), { status: "prise", takenBy: "Troisieme" }));
+await expect("un choisi l'accepte au nom d'un autre", false, () =>
+  updateDoc(doc(req.db, "rides/a1"), { status: "prise", takenBy: "Autre" }));
+await expect("un choisi l'accepte en changeant le tarif", false, () =>
   updateDoc(doc(req.db, "rides/a1"), { status: "prise", takenBy: "Demandeur", tarif: "999" }));
-await expect("le chauffeur choisi l'accepte", true, () =>
+await expect("le premier choisi l'accepte", true, () =>
   updateDoc(doc(req.db, "rides/a1"), { status: "prise", takenBy: "Demandeur" }));
-await expect("…puis la relâche (elle revient au posteur, refusée)", true, () =>
-  updateDoc(doc(req.db, "rides/a1"), { status: "disponible", takenBy: null, assignStatus: "refusee", assignRespondedAt: Date.now() }));
-await adminSet("a2", assigned({}));
-await expect("un autre chauffeur la refuse à sa place", false, () =>
-  updateDoc(doc(other.db, "rides/a2"), { assignStatus: "refusee", assignRespondedAt: Date.now() }));
-await expect("le chauffeur choisi la refuse", true, () =>
-  updateDoc(doc(req.db, "rides/a2"), { assignStatus: "refusee", assignRespondedAt: Date.now() }));
-await expect("…puis l'accepte quand même après l'avoir refusée", false, () =>
+await expect("le second choisi l'accepte juste après (trop tard)", false, () =>
+  updateDoc(doc(other.db, "rides/a1"), { status: "prise", takenBy: "Autre" }));
+await expect("…le premier la relâche (il passe dans les refus)", true, () =>
+  updateDoc(doc(req.db, "rides/a1"), { status: "disponible", takenBy: null, assignRefused: arrayUnion("Demandeur"), assignRespondedAt: Date.now() }));
+await expect("…il la reprend après l'avoir relâchée", false, () =>
+  updateDoc(doc(req.db, "rides/a1"), { status: "prise", takenBy: "Demandeur" }));
+await expect("…le second choisi peut alors l'accepter", true, () =>
+  updateDoc(doc(other.db, "rides/a1"), { status: "prise", takenBy: "Autre" }));
+
+await adminSet("a2", sent(["Demandeur", "Autre"]));
+await expect("un non choisi la refuse à leur place", false, () =>
+  updateDoc(doc(third.db, "rides/a2"), { assignRefused: arrayUnion("Troisieme"), assignRespondedAt: Date.now() }));
+await expect("un choisi refuse au nom d'un autre", false, () =>
+  updateDoc(doc(req.db, "rides/a2"), { assignRefused: arrayUnion("Autre"), assignRespondedAt: Date.now() }));
+await expect("un choisi la refuse", true, () =>
+  updateDoc(doc(req.db, "rides/a2"), { assignRefused: arrayUnion("Demandeur"), assignRespondedAt: Date.now() }));
+await expect("…puis l'accepte quand même", false, () =>
   updateDoc(doc(req.db, "rides/a2"), { status: "prise", takenBy: "Demandeur" }));
-await expect("…ou se la renvoie à lui-même", false, () =>
-  updateDoc(doc(req.db, "rides/a2"), { assignStatus: "envoyee" }));
-await expect("posteur l'envoie à un autre chauffeur", true, () =>
-  updateDoc(doc(poster.db, "rides/a2"), { assignedTo: "Autre", assignStatus: "envoyee", assignRespondedAt: null }));
-await expect("l'ancien destinataire l'accepte encore", false, () =>
-  updateDoc(doc(req.db, "rides/a2"), { status: "prise", takenBy: "Demandeur" }));
+await expect("…ou efface son refus", false, () =>
+  updateDoc(doc(req.db, "rides/a2"), { assignRefused: [] }));
+await expect("l'autre choisi refuse aussi (elle revient au posteur)", true, () =>
+  updateDoc(doc(other.db, "rides/a2"), { assignRefused: arrayUnion("Autre"), assignRespondedAt: Date.now() }));
+await expect("posteur la renvoie à un troisième chauffeur", true, () =>
+  updateDoc(doc(poster.db, "rides/a2"), { assignees: ["Troisieme"], assignRefused: [], assignRespondedAt: null }));
+await expect("l'ancien choisi l'accepte encore", false, () =>
+  updateDoc(doc(other.db, "rides/a2"), { status: "prise", takenBy: "Autre" }));
 await expect("posteur la publie à tous", true, () =>
-  updateDoc(doc(poster.db, "rides/a2"), { assignedTo: null, assignStatus: null, assignRespondedAt: null }));
+  updateDoc(doc(poster.db, "rides/a2"), { assignees: deleteField(), assignRefused: deleteField(), assignRespondedAt: deleteField() }));
 await expect("…et n'importe qui peut alors la demander", true, () =>
   updateDoc(doc(req.db, "rides/a2"), { status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
-await adminSet("a3", assigned({}));
+
+// Ancien format (un seul chauffeur dans assignedTo), course prise : elle doit rester protégée.
+await adminSet("a3", baseRide({ assignedTo: "Demandeur", assignStatus: "envoyee", status: "prise", takenBy: "Demandeur" }));
+await expect("ancien format : le preneur relâche (refusée)", true, () =>
+  updateDoc(doc(req.db, "rides/a3"), { status: "disponible", takenBy: null, assignStatus: "refusee", assignRespondedAt: Date.now() }));
+await expect("ancien format : un autre la demande ensuite", false, () =>
+  updateDoc(doc(other.db, "rides/a3"), { status: "en_attente", pendingBy: "Autre", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
+await adminSet("a4", sent(["Demandeur"]));
 await expect("posteur met à la corbeille une course envoyée sans réponse", true, () =>
-  updateDoc(doc(poster.db, "rides/a3"), { deleted: true, deletedBy: "Poster", deletedAt: Date.now() }));
+  updateDoc(doc(poster.db, "rides/a4"), { deleted: true, deletedBy: "Poster", deletedAt: Date.now() }));
 
 // --- Fiche profil à l'inscription (email pas encore confirmé) ---
 const nouveau = await makeUser("Nouveau", { verified: false });

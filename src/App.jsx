@@ -15,6 +15,7 @@ import {
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
   setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth, ensureOwnProfile,
+  isAssignedRide, rideAssignees, rideAssignRefused, rideAssigneesPending, refuseAssignedRide, releaseAssignedRide, sendRideToDrivers,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
@@ -136,10 +137,11 @@ export default function App() {
   const [rides, setRides] = useState([]);
   // Courses mises à la corbeille (deleted: true) : masquées partout, visibles par l'admin seul.
   const [deletedRides, setDeletedRides] = useState([]);
-  // Formulaire : chauffeur à qui envoyer directement la course ("" = publication à tous).
-  const [sendToDriver, setSendToDriver] = useState("");
-  // Course à réattribuer : id de la course dont le posteur choisit un autre destinataire.
+  // Formulaire : chauffeurs à qui envoyer directement la course ([] = publication à tous).
+  const [sendToDrivers, setSendToDrivers] = useState([]);
+  // Course à renvoyer : id de la course dont le posteur choisit d'autres destinataires.
   const [reassignRideId, setReassignRideId] = useState(null);
+  const [reassignSel, setReassignSel] = useState([]);
   const [myRides, setMyRides] = useState([]); // historique complet du chauffeur (listenMyRides)
   const [positions, setPositions] = useState({});
   const [profiles, setProfiles] = useState({});
@@ -753,12 +755,13 @@ export default function App() {
 
   useEffect(() => {
     const unsubRides = listenRides((allRides) => {
-      // Course envoyée à un chauffeur précis : visible seulement par le posteur et par
-      // ce chauffeur (tant qu'il ne l'a pas refusée). Masquage côté appli uniquement :
-      // les règles Firestore laissent toujours lire les courses à tout chauffeur vérifié.
+      // Course envoyée à des chauffeurs choisis : visible seulement par le posteur, par
+      // ceux qui ne l'ont pas refusée tant qu'elle est libre, puis par celui qui l'a prise.
+      // Masquage côté appli uniquement : les règles Firestore laissent toujours lire les
+      // courses à tout chauffeur vérifié.
       const newRides = allRides.filter((r) => !r.deleted && (
-        !r.assignedTo || r.postedBy === driverName
-        || (r.assignedTo === driverName && r.assignStatus !== "refusee")
+        !isAssignedRide(r) || r.postedBy === driverName || r.takenBy === driverName
+        || (r.status === "disponible" && rideAssigneesPending(r).includes(driverName))
       ));
       setDeletedRides(allRides.filter((r) => r.deleted));
       if (!firstLoad.current) {
@@ -766,8 +769,8 @@ export default function App() {
           const prevInfo = knownRideIds.current.get(r.id);
           const prevStatus = prevInfo?.status;
           const isNew = prevInfo === undefined;
-          if (isNew && r.status === "disponible" && r.assignedTo === driverName && r.postedBy !== driverName) {
-            // Course qu'un collègue m'envoie à moi seul : popup Accepter / Refuser.
+          if (isNew && r.status === "disponible" && isAssignedRide(r) && r.postedBy !== driverName) {
+            // Course qu'un collègue m'envoie (à moi seul ou à quelques-uns) : popup Accepter / Refuser.
             notifyAssignedRide(r);
             vibrate("priority");
             setPriorityAlert({ ride: r, assigned: true });
@@ -805,8 +808,10 @@ export default function App() {
               setReleaseAlert({ ride: r, takenByName: prevInfo.takenBy });
             }
           }
-          if (!isNew && r.postedBy === driverName && r.assignStatus === "refusee"
-            && prevInfo?.assignStatus !== "refusee" && prevStatus === "disponible") {
+          // Tous les chauffeurs choisis ont refusé : la course me revient.
+          const allRefused = isAssignedRide(r) && rideAssigneesPending(r).length === 0;
+          if (!isNew && r.postedBy === driverName && allRefused
+            && !prevInfo?.allRefused && prevStatus === "disponible") {
             notifyAssignRefused(r);
             vibrate("claim");
           }
@@ -818,7 +823,8 @@ export default function App() {
           }
         });
       }
-      knownRideIds.current = new Map(newRides.map((r) => [r.id, { status: r.status, takenBy: r.takenBy, modifAt: r.modifiedAfterAccept?.at || null, assignStatus: r.assignStatus || null }]));
+      knownRideIds.current = new Map(newRides.map((r) => [r.id, { status: r.status, takenBy: r.takenBy, modifAt: r.modifiedAfterAccept?.at || null,
+        allRefused: isAssignedRide(r) && rideAssigneesPending(r).length === 0 }]));
       firstLoad.current = false;
       setRides(newRides);
     });
@@ -985,9 +991,10 @@ export default function App() {
     if (!priorityAlert) return;
     const check = () => {
       const current = ridesRef.current.find((x) => x.id === priorityAlert.ride.id);
-      // Une course envoyée à moi seul n'a pas de fenêtre : le popup reste jusqu'à ma réponse.
+      // Une course envoyée à des chauffeurs choisis n'a pas de fenêtre : le popup reste
+      // jusqu'à ma réponse, ou jusqu'à ce qu'un autre l'accepte (status != disponible).
       const expired = priorityAlert.assigned
-        ? current?.assignedTo !== driverNameRef.current || current?.assignStatus === "refusee"
+        ? !rideAssigneesPending(current).includes(driverNameRef.current)
         : Date.now() >= priorityWindowEndsAt(priorityAlert.ride);
       if (expired || !current || current.status !== "disponible") {
         setPriorityAlert(null);
@@ -1155,12 +1162,13 @@ export default function App() {
           createdAt: Date.now(),
           lat: myPos ? myPos.lat : null,
           lng: myPos ? myPos.lng : null,
-          // Envoyée à un seul chauffeur : invisible pour les autres, pas de fenêtre de priorité.
-          ...(sendToDriver ? { assignedTo: sendToDriver, assignStatus: "envoyee" } : {}),
+          // Envoyée à des chauffeurs choisis : invisible pour les autres, pas de fenêtre de
+          // priorité, le premier des choisis qui accepte l'obtient.
+          ...(sendToDrivers.length ? { assignees: sendToDrivers, assignRefused: [] } : {}),
         };
         await addRide(newRide);
       }
-      setSendToDriver("");
+      setSendToDrivers([]);
       setForm(emptyForm);
       setEditingId(null);
       setShowForm(false);
@@ -1396,40 +1404,46 @@ export default function App() {
   // Plusieurs chauffeurs prioritaires peuvent taper en même temps : la
   // transaction côté Firestore n'en laisse passer qu'un seul, les autres
   // reçoivent "already_taken" et sont prévenus proprement.
-  // --- Course envoyée à un chauffeur précis ---
-  // Le chauffeur choisi accepte : la course est à lui directement (pas de confirmation du
-  // posteur, c'est lui qui l'a choisi).
+  // --- Course envoyée à un ou plusieurs chauffeurs choisis ---
+  // Un des chauffeurs choisis accepte : la course est à lui directement (pas de confirmation
+  // du posteur, c'est lui qui l'a choisi). S'ils sont plusieurs, le premier l'emporte : les
+  // règles refusent l'acceptation dès que la course n'est plus "disponible".
   const acceptAssigned = async (ride) => {
     try {
       await updateRide(ride.id, { status: "prise", takenBy: driverName });
       setSelectedRide(ride);
     } catch (e) {
       setError(e.code === "permission-denied"
-        ? "Cette course n'est plus pour toi (reprise ou envoyée à un autre chauffeur)."
+        ? "Trop tard — un autre chauffeur l'a acceptée avant toi (ou elle a été renvoyée à d'autres)."
         : "Échec de l'action.");
+      setSelectedRide(null);
     }
   };
 
-  // Il refuse : elle disparaît de chez lui et revient au posteur, qui décide de la suite.
+  // Il refuse : elle disparaît de chez lui. Quand tous les choisis ont refusé, elle revient
+  // au posteur, qui décide de la suite.
   const refuseAssigned = async (id) => {
     try {
-      await updateRide(id, { assignStatus: "refusee", assignRespondedAt: Date.now() });
+      await refuseAssignedRide(id, driverName);
     } catch (e) {
       setError("Échec de l'action.");
     }
   };
 
-  // Le posteur l'envoie à un (autre) chauffeur, ou la publie à tout le monde (name = null).
-  const sendRideTo = async (id, name) => {
+  // Le posteur l'envoie à d'autres chauffeurs, ou la publie à tout le monde (names vide).
+  const sendRideTo = async (id, names) => {
     try {
-      await updateRide(id, name
-        ? { assignedTo: name, assignStatus: "envoyee", assignRespondedAt: null }
-        : { assignedTo: null, assignStatus: null, assignRespondedAt: null });
+      await sendRideToDrivers(id, names);
       setReassignRideId(null);
+      setReassignSel([]);
     } catch (e) {
       setError("Échec de l'action.");
     }
   };
+
+  const namesLabel = (names) =>
+    names.length <= 2 ? names.join(" et ") : `${names.slice(0, -1).join(", ")} et ${names[names.length - 1]}`;
+  const sendToLabel = sendToDrivers.length === 1 ? `Envoyer à ${sendToDrivers[0]}` : `Envoyer aux ${sendToDrivers.length} chauffeurs`;
 
   // Chauffeurs à qui on peut envoyer une course : inscrits, ni bannis ni supprimés, pas moi.
   // Les positions rattrapent les anciens comptes sans fiche (purgées avec le compte).
@@ -1437,28 +1451,52 @@ export default function App() {
     .filter((n) => n !== driverName && !profiles[n]?.banned && !profiles[n]?.deleted)
     .sort((a, b) => a.localeCompare(b, "fr"));
 
-  const renderDriverPicker = (value, onChange, { allLabel }) => (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      style={{ ...styles.input, width: "100%" }}
-    >
-      {allLabel && <option value="">{allLabel}</option>}
-      {!allLabel && <option value="" disabled>Choisir un chauffeur…</option>}
-      {assignableDrivers.map((n) => <option key={n} value={n}>{n}</option>)}
-    </select>
-  );
+  // Choix des chauffeurs en pastilles à cocher (plusieurs possibles). allLabel : pastille
+  // « tout le monde » qui vide la sélection (absente quand il faut au moins un chauffeur).
+  const renderDriverPicker = (selected, onChange, { allLabel }) => {
+    const pill = (active) => ({
+      ...styles.togglePill,
+      borderColor: active ? "#FFB43A" : "var(--border-outline)",
+      color: active ? "#1A1206" : "var(--text-tertiary)",
+      background: active ? "#FFB43A" : "transparent",
+    });
+    const toggle = (n) => onChange(selected.includes(n) ? selected.filter((x) => x !== n) : [...selected, n]);
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+        {allLabel && (
+          <button type="button" onClick={() => onChange([])} style={pill(selected.length === 0)}>
+            <Users size={13} style={{ marginRight: 4 }} /> {allLabel}
+          </button>
+        )}
+        {assignableDrivers.map((n) => (
+          <button type="button" key={n} onClick={() => toggle(n)} style={pill(selected.includes(n))}>
+            {selected.includes(n) && <Check size={13} style={{ marginRight: 4 }} />}{n}
+          </button>
+        ))}
+        {assignableDrivers.length === 0 && (
+          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Aucun autre chauffeur inscrit.</span>
+        )}
+      </div>
+    );
+  };
 
-  // Bandeau + actions d'une course envoyée à un chauffeur précis (encore disponible).
+  // Bandeau + actions d'une course envoyée à des chauffeurs choisis (encore disponible).
   const renderAssignBlock = (r, { compact = false } = {}) => {
-    if (!r.assignedTo || r.status !== "disponible") return null;
+    if (!isAssignedRide(r) || r.status !== "disponible") return null;
     const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
     const btn = compact ? styles.btnGhost : styles.btnSecondaryAction;
-    if (r.assignedTo === driverName && r.postedBy !== driverName) {
+    const pending = rideAssigneesPending(r);
+    const refusedBy = rideAssignRefused(r);
+    if (pending.includes(driverName) && r.postedBy !== driverName) {
+      const others = pending.length - 1;
       return (
         <div style={styles.pendingBanner} onClick={(e) => e.stopPropagation()}>
-          <div>📨 <strong>{r.postedBy}</strong> t'envoie cette course, à toi seul.</div>
+          <div>
+            📨 <strong>{r.postedBy}</strong> t'envoie cette course
+            {others > 0
+              ? <> — proposée aussi à {others} autre{others > 1 ? "s" : ""} chauffeur{others > 1 ? "s" : ""} : le premier qui accepte l'obtient.</>
+              : <>, à toi seul.</>}
+          </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button onClick={stop(() => { acceptAssigned(r); setPriorityAlert(null); })} style={{ ...styles.btnClaim, flex: 1, justifyContent: "center" }}>
               <Check size={14} style={{ marginRight: 4 }} /> Accepter
@@ -1471,25 +1509,37 @@ export default function App() {
       );
     }
     if (r.postedBy !== driverName) return null;
-    const refused = r.assignStatus === "refusee";
+    const allRefused = pending.length === 0;
     return (
       <div style={styles.pendingBanner} onClick={(e) => e.stopPropagation()}>
         <div>
-          {refused
-            ? <>❌ <strong>{r.assignedTo}</strong> a refusé cette course. Que veux-tu en faire ?</>
-            : <>📨 Envoyée à <strong>{r.assignedTo}</strong> seulement — en attente de sa réponse.</>}
+          {allRefused
+            ? <>❌ {refusedBy.length > 1 ? <>Tous ont refusé ({namesLabel(refusedBy)})</> : <><strong>{refusedBy[0]}</strong> a refusé</>}. Que veux-tu en faire ?</>
+            : <>📨 Envoyée à <strong>{namesLabel(pending)}</strong>{pending.length > 1 ? " — le premier qui accepte l'obtient" : " seulement"}. En attente de réponse.</>}
         </div>
+        {!allRefused && refusedBy.length > 0 && (
+          <div style={{ fontSize: 12.5, marginTop: 4, opacity: 0.8 }}>Refusée par {namesLabel(refusedBy)}.</div>
+        )}
         {reassignRideId === r.id ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
-            {renderDriverPicker("", (name) => name && sendRideTo(r.id, name), { allLabel: null })}
-            <button onClick={stop(() => setReassignRideId(null))} style={btn}>Annuler</button>
+            {renderDriverPicker(reassignSel, setReassignSel, { allLabel: null })}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                disabled={reassignSel.length === 0}
+                onClick={stop(() => sendRideTo(r.id, reassignSel))}
+                style={{ ...styles.btnClaim, flex: 1, justifyContent: "center", opacity: reassignSel.length ? 1 : 0.5 }}
+              >
+                <Send size={13} style={{ marginRight: 4 }} /> Envoyer{reassignSel.length > 1 ? ` aux ${reassignSel.length}` : ""}
+              </button>
+              <button onClick={stop(() => { setReassignRideId(null); setReassignSel([]); })} style={btn}>Annuler</button>
+            </div>
           </div>
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-            <button onClick={stop(() => setReassignRideId(r.id))} style={btn}>
-              <Send size={13} style={{ marginRight: 4 }} /> {refused ? "Envoyer à un autre" : "Changer de chauffeur"}
+            <button onClick={stop(() => { setReassignRideId(r.id); setReassignSel(allRefused ? [] : pending); })} style={btn}>
+              <Send size={13} style={{ marginRight: 4 }} /> {allRefused ? "Envoyer à d'autres" : "Changer les chauffeurs"}
             </button>
-            <button onClick={stop(() => sendRideTo(r.id, null))} style={btn}>
+            <button onClick={stop(() => sendRideTo(r.id, []))} style={btn}>
               <Users size={13} style={{ marginRight: 4 }} /> Publier à tous
             </button>
           </div>
@@ -1499,7 +1549,7 @@ export default function App() {
   };
 
   const claim = async (ride) => {
-    if (ride.assignedTo === driverName) return acceptAssigned(ride);
+    if (rideAssigneesPending(ride).includes(driverName)) return acceptAssigned(ride);
     try {
       await claimRide(ride.id, driverName);
       // Ouvre directement la fenêtre de détail sur la course qu'on vient de
@@ -1667,12 +1717,11 @@ export default function App() {
 
   const release = async (id) => {
     try {
-      // Course qu'on m'avait envoyée à moi seul : en la relâchant, elle revient au posteur
-      // (refusée) au lieu de me réapparaître comme une proposition.
+      // Course qu'on m'avait envoyée : en la relâchant, je passe dans les refus. Elle repart
+      // aux autres chauffeurs choisis, ou revient au posteur s'il n'en reste aucun.
       const r = rides.find((x) => x.id === id);
-      await updateRide(id, r?.assignedTo === driverName
-        ? { status: "disponible", takenBy: null, assignStatus: "refusee", assignRespondedAt: Date.now() }
-        : { status: "disponible", takenBy: null });
+      if (r && rideAssignees(r).includes(driverName)) await releaseAssignedRide(r, driverName);
+      else await updateRide(id, { status: "disponible", takenBy: null });
     } catch (e) {
       setError("Échec de l'action.");
     }
@@ -2358,7 +2407,9 @@ export default function App() {
 
               <p style={styles.priorityAlertSub}>
                 {priorityAlert.assigned
-                  ? `${r.postedBy} t'envoie cette course, à toi seul.`
+                  ? rideAssignees(r).length > 1
+                    ? `${r.postedBy} t'envoie cette course, ainsi qu'à ${rideAssignees(r).length - 1} autre${rideAssignees(r).length > 2 ? "s" : ""} — le premier qui accepte l'obtient.`
+                    : `${r.postedBy} t'envoie cette course, à toi seul.`
                   : priorityAlert.shared
                   ? "Tu fais partie des chauffeurs les plus proches — le premier qui accepte l'obtient."
                   : "Tu es le chauffeur le plus proche."}
@@ -2754,7 +2805,7 @@ export default function App() {
               </div>
               <button
                 type="button"
-                onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); setSendToDriver(""); editOriginalTarifInputs.current = null; }}
+                onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); setSendToDrivers([]); editOriginalTarifInputs.current = null; }}
                 style={styles.wizardNavBtn}
                 aria-label="Annuler"
               >
@@ -3000,7 +3051,7 @@ export default function App() {
                         {form.tarif && !calculatingTarif && <> Tarif calculé : <strong style={{ color: "var(--text-primary)" }}>{form.tarif} €</strong>.</>}
                       </div>
                       <div style={{ marginBottom: 10 }}>
-                        {renderDriverPicker(sendToDriver, setSendToDriver, { allLabel: "Envoyer à tous les chauffeurs" })}
+                        {renderDriverPicker(sendToDrivers, setSendToDrivers, { allLabel: "Envoyer à tous les chauffeurs" })}
                       </div>
                       <button
                         type="button"
@@ -3008,7 +3059,7 @@ export default function App() {
                         onClick={submitRide}
                         style={{ ...styles.btnPrimaryAction, opacity: calculatingTarif ? 0.6 : 1 }}
                       >
-                        <Send size={18} /> {calculatingTarif ? "Calcul du tarif…" : sendToDriver ? `Envoyer à ${sendToDriver}` : "Publier maintenant"}
+                        <Send size={18} /> {calculatingTarif ? "Calcul du tarif…" : sendToDrivers.length ? sendToLabel : "Publier maintenant"}
                       </button>
                     </div>
                   )}
@@ -3207,15 +3258,17 @@ export default function App() {
                   </div>
 
                   {!editingId && (
-                    <label style={{ ...styles.formLabel, marginTop: 16 }}>
+                    <div style={{ ...styles.formLabel, marginTop: 16 }}>
                       Envoyer à
-                      {renderDriverPicker(sendToDriver, setSendToDriver, { allLabel: "Tous les chauffeurs (publication normale)" })}
-                      {sendToDriver && (
+                      {renderDriverPicker(sendToDrivers, setSendToDrivers, { allLabel: "Tous les chauffeurs (publication normale)" })}
+                      {sendToDrivers.length > 0 && (
                         <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
-                          Seul {sendToDriver} verra cette course et pourra l'accepter ou la refuser.
+                          {sendToDrivers.length > 1
+                            ? `Seuls ces ${sendToDrivers.length} chauffeurs verront cette course — le premier qui l'accepte l'obtient.`
+                            : `Seul ${sendToDrivers[0]} verra cette course et pourra l'accepter ou la refuser.`}
                         </span>
                       )}
-                    </label>
+                    </div>
                   )}
                 </>
               )}
@@ -3226,7 +3279,7 @@ export default function App() {
                 <>
                   <button
                     type="button"
-                    onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); setSendToDriver(""); editOriginalTarifInputs.current = null; }}
+                    onClick={() => { setShowForm(false); setEditingId(null); setForm(emptyForm); setSendToDrivers([]); editOriginalTarifInputs.current = null; }}
                     style={{ ...styles.btnGhost, minHeight: 52, fontSize: 15 }}
                   >
                     Annuler
@@ -3259,7 +3312,7 @@ export default function App() {
                     Retour
                   </button>
                   <button type="submit" style={{ ...styles.btnPrimary, flex: 1, minHeight: 52, fontSize: 16, justifyContent: "center" }}>
-                    {editingId ? "Enregistrer les modifications" : sendToDriver ? `Envoyer à ${sendToDriver}` : "Publier la course"}
+                    {editingId ? "Enregistrer les modifications" : sendToDrivers.length ? sendToLabel : "Publier la course"}
                   </button>
                 </>
               )}
@@ -3358,7 +3411,7 @@ export default function App() {
             const remainingLabel = remainingMs > 0 ? `${Math.ceil(remainingMs / 1000)}s` : null;
             const iAmPriority = priorityDrivers.some((d) => d.name === driverName);
             const isPriorityLocked =
-              r.status === "disponible" && !r.assignedTo && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
+              r.status === "disponible" && !isAssignedRide(r) && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
             const timing = rideTimingBadge(r);
 
             return (
@@ -3462,7 +3515,7 @@ export default function App() {
                   </div>
                 )}
 
-                {r.status === "disponible" && !r.assignedTo && withinWindow && iAmPriority && !mine && (
+                {r.status === "disponible" && !isAssignedRide(r) && withinWindow && iAmPriority && !mine && (
                   <div style={styles.priorityBanner}>
                     <Timer size={13} style={{ marginRight: 6 }} />
                     {priorityDrivers.length === 1
@@ -3488,7 +3541,7 @@ export default function App() {
                 <div style={styles.cardFooter}>
                   <span style={styles.postedBy}>Posté par {r.postedBy} · {formatPostedAt(r.createdAt)}</span>
                   <div style={{ display: "flex", gap: 8 }}>
-                    {r.status === "disponible" && !mine && !r.assignedTo && !isPriorityLocked && (
+                    {r.status === "disponible" && !mine && !isAssignedRide(r) && !isPriorityLocked && (
                       awaitingServerPriority(r) ? renderAwaitingClaimBtn(styles.btnClaim) : (
                         <button onClick={(e) => { e.stopPropagation(); claim(r); }} style={styles.btnClaim}>
                           <Check size={14} style={{ marginRight: 4 }} />
@@ -3559,7 +3612,7 @@ export default function App() {
         const withinWindow = Date.now() < priorityWindowEndsAt(r);
         const iAmPriority = priorityDrivers.some((d) => d.name === driverName);
         const isPriorityLocked =
-          r.status === "disponible" && !r.assignedTo && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
+          r.status === "disponible" && !isAssignedRide(r) && priorityDrivers.length > 0 && withinWindow && !iAmPriority && !mine;
         const dist = myPos ? distanceKm(myPos, ridePickupCoords(r)) : null;
         const timing = rideTimingBadge(r);
         return (
@@ -3757,7 +3810,7 @@ export default function App() {
                 </div>
               )}
 
-              {r.status === "disponible" && !r.assignedTo && withinWindow && iAmPriority && !mine && (
+              {r.status === "disponible" && !isAssignedRide(r) && withinWindow && iAmPriority && !mine && (
                 <div style={styles.priorityBanner}>
                   <Timer size={13} style={{ marginRight: 6 }} />
                   {priorityDrivers.length === 1
@@ -3781,7 +3834,7 @@ export default function App() {
               )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border-outline)" }}>
-                {r.status === "disponible" && !mine && !r.assignedTo && !isPriorityLocked && (
+                {r.status === "disponible" && !mine && !isAssignedRide(r) && !isPriorityLocked && (
                   awaitingServerPriority(r) ? renderAwaitingClaimBtn(styles.btnPrimaryAction) : (
                     <button onClick={() => claim(r)} style={styles.btnPrimaryAction}>
                       <Check size={16} /> Je la prends

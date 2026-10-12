@@ -192,25 +192,35 @@ const rideData = (rideId, ride) => ({
   heure: String(ride.heure || ""),
 });
 
-async function notifyAssignee(rideId, ride) {
-  const entries = await tokensFor([ride.assignedTo]);
-  await sendTo(entries, {
+// Course envoyée à un ou plusieurs chauffeurs choisis (assignees ; anciennes courses : un
+// seul, assignedTo). assignRefused : ceux qui l'ont refusée ou relâchée. Mêmes helpers
+// que rideAssignees / rideAssigneesPending dans src/firebase.js.
+const assigneesOf = (r) => (Array.isArray(r?.assignees) ? r.assignees : r?.assignedTo ? [r.assignedTo] : []);
+const refusedOf = (r) => (Array.isArray(r?.assignRefused) ? r.assignRefused
+  : r?.assignStatus === "refusee" && r?.assignedTo ? [r.assignedTo] : []);
+const pendingOf = (r) => assigneesOf(r).filter((n) => !refusedOf(r).includes(n));
+
+async function notifyAssignees(rideId, ride, names) {
+  if (names.length === 0) return;
+  const others = assigneesOf(ride).length - 1;
+  await sendTo(await tokensFor(names), {
     notification: {
       title: ride.urgent ? "🚨 Course urgente pour toi" : "📨 Course pour toi",
-      body: `${ride.postedBy} t'envoie : ${ride.depart} → ${ride.arrivee}${ride.heure ? ` — ${ride.heure}` : ""}`,
+      body: `${ride.postedBy} t'envoie : ${ride.depart} → ${ride.arrivee}${ride.heure ? ` — ${ride.heure}` : ""}`
+        + (others > 0 ? ` (proposée à ${others + 1} chauffeurs, le premier qui accepte l'obtient)` : ""),
     },
-    data: { ...rideData(rideId, ride), priority: "true", shared: "false" },
+    data: { ...rideData(rideId, ride), priority: "true", shared: String(others > 0) },
     requireInteraction: true,
   });
 }
 
-// Course envoyée à un chauffeur précis : réponses et changements de destinataire.
-// Renvoie true si l'événement a été traité ici.
+// Réponses des chauffeurs choisis et changements de destinataires.
+// Renvoie true si l'événement a été entièrement traité ici.
 async function handleAssignmentChange(rideId, before, after) {
   if (after.deleted) return false;
 
-  // Le chauffeur choisi accepte : on prévient le posteur.
-  if (before.status === "disponible" && after.status === "prise" && after.assignedTo && after.takenBy === after.assignedTo) {
+  // Un des chauffeurs choisis accepte (le premier) : on prévient le posteur.
+  if (before.status === "disponible" && after.status === "prise" && assigneesOf(after).includes(after.takenBy)) {
     await sendTo(await tokensFor([after.postedBy]), {
       notification: { title: "✅ Course acceptée", body: `${after.takenBy} prend ${after.depart} → ${after.arrivee}` },
       data: rideData(rideId, after),
@@ -219,22 +229,18 @@ async function handleAssignmentChange(rideId, before, after) {
   }
   if (after.status !== "disponible") return false;
 
-  // Il refuse (le relâchement d'une course prise est déjà notifié par ailleurs).
-  if (before.status === "disponible" && after.assignedTo && after.assignStatus === "refusee" && before.assignStatus !== "refusee") {
-    await sendTo(await tokensFor([after.postedBy]), {
-      notification: { title: "❌ Course refusée", body: `${after.assignedTo} ne prend pas ${after.depart} → ${after.arrivee} — à toi de choisir la suite.` },
-      data: rideData(rideId, after),
-    });
-    return true;
+  // Relâchée par celui qui l'avait acceptée : elle repart aux autres choisis. Le posteur
+  // est prévenu du relâchement par la suite de notifyRideStatusChange (return false).
+  if (before.status === "prise" && assigneesOf(after).length > 0) {
+    await notifyAssignees(rideId, after, pendingOf(after));
+    return false;
   }
-  // Le posteur l'envoie à un autre chauffeur (ou au même, après un refus).
-  if (after.assignedTo && after.assignStatus === "envoyee"
-    && (after.assignedTo !== before.assignedTo || before.assignStatus === "refusee")) {
-    await notifyAssignee(rideId, after);
-    return true;
-  }
+  if (before.status !== "disponible") return false;
+
+  const wasAssigned = assigneesOf(before).length > 0;
+  const isAssigned = assigneesOf(after).length > 0;
   // Le posteur la publie à tous : annoncée comme une nouvelle course, sans priorité.
-  if (before.assignedTo && !after.assignedTo) {
+  if (wasAssigned && !isAssigned) {
     const others = await allTokensExcept([after.postedBy]);
     await sendTo(others, {
       notification: {
@@ -242,6 +248,26 @@ async function handleAssignmentChange(rideId, before, after) {
         body: `${after.depart} → ${after.arrivee} — ${after.heure || ""}`.trim(),
       },
       data: { ...rideData(rideId, after), priority: "false", shared: "false" },
+    });
+    return true;
+  }
+  if (!isAssigned) return false;
+
+  // Le posteur la (r)envoie : on prévient ceux à qui elle vient d'être proposée.
+  const newlyPending = pendingOf(after).filter((n) => !pendingOf(before).includes(n));
+  if (newlyPending.length > 0) {
+    await notifyAssignees(rideId, after, newlyPending);
+    return true;
+  }
+  // Le dernier chauffeur choisi encore en lice vient de refuser : elle revient au posteur.
+  if (pendingOf(before).length > 0 && pendingOf(after).length === 0) {
+    const refused = refusedOf(after);
+    await sendTo(await tokensFor([after.postedBy]), {
+      notification: {
+        title: "❌ Course refusée",
+        body: `${refused.length > 1 ? "Tous les chauffeurs choisis ont refusé" : `${refused[0]} ne prend pas`} ${after.depart} → ${after.arrivee} — à toi de choisir la suite.`,
+      },
+      data: rideData(rideId, after),
     });
     return true;
   }
@@ -257,12 +283,12 @@ exports.notifyNewRide = onDocumentCreated(
     const ride = snap.data();
     if (!ride || ride.status !== "disponible") return;
 
-    // Course envoyée par le posteur à un seul chauffeur : pas de priorité géographique,
-    // on ne prévient que lui. priorityDrivers vide = ouverte à tous tout de suite si le
+    // Course envoyée par le posteur à des chauffeurs choisis : pas de priorité géographique,
+    // on ne prévient qu'eux. priorityDrivers vide = ouverte à tous tout de suite si le
     // posteur la publie plus tard (les règles exigent que le champ existe).
-    if (ride.assignedTo) {
+    if (assigneesOf(ride).length > 0) {
       await snap.ref.update({ priorityDrivers: [], priorityUntil: 0 });
-      await notifyAssignee(event.params.rideId, ride);
+      await notifyAssignees(event.params.rideId, ride, pendingOf(ride));
       return;
     }
 

@@ -74,13 +74,16 @@ ever changes, update all three.
 **Ride lifecycle** (`status` field): `disponible` → `en_attente` (claim pending confirmation,
 via `claimRide`'s Firestore transaction to avoid double-claims) → `prise` → `en_cours` → `terminee`.
 
-**Rides sent to one driver** (`assignedTo` + `assignStatus`: `envoyee` | `refusee`): hidden
-client-side from everyone but the poster and the assignee (Firestore reads stay open to all
-verified drivers), no priority window (`notifyNewRide` writes `priorityDrivers: []` and notifies
-only the assignee), `isClaim` refuses them. The assignee accepts (straight to `prise`) or refuses;
-a refusal or release sends it back to the poster, who can resend it or publish it to everyone
-(`assignedTo: null`). Push notifications for these transitions: `handleAssignmentChange()` in
-`functions/index.js`.
+**Rides sent to chosen drivers** (`assignees: string[]` + `assignRefused: string[]`; older rides
+use a single `assignedTo` + `assignStatus: "refusee"`, still read via `rideAssignees()` /
+`rideAssignRefused()` in `src/firebase.js` and `assigneesOf()` / `refusedOf()` in
+`functions/index.js`): hidden client-side from everyone but the poster, the assignees who haven't
+refused (while `disponible`) and the taker (Firestore reads stay open to all verified drivers). No
+priority window (`notifyNewRide` writes `priorityDrivers: []` and notifies only the assignees);
+`isClaim` refuses them. The first assignee to accept gets it (straight to `prise`; rules require
+`disponible`); a refusal or release appends the driver to `assignRefused`. When none are left, it is
+back with the poster, who can resend it or publish it to everyone (clear `assignees`). Push
+notifications for these transitions: `handleAssignmentChange()` in `functions/index.js`.
 
 **Ride deletion is soft** (`deleted`/`deletedBy`/`deletedAt`, via `archiveRide`): archived rides
 are hidden everywhere and shown to the admin only, in the "Corbeille" view (restore or hard

@@ -47,7 +47,7 @@ service cloud.firestore {
     // requête (serverTimestamp), impossible à antidater.
     function isClaim() {
       return resource.data.status == 'disponible'
-        && resource.data.get('assignedTo', null) == null
+        && !isAssignedRide(resource.data)
         && request.resource.data.status == 'en_attente'
         && request.resource.data.pendingBy == request.auth.token.name
         && request.resource.data.pendingAt == request.time
@@ -83,17 +83,25 @@ service cloud.firestore {
           && changedOnly(['status']))
         || (resource.data.status == 'prise' && request.resource.data.status == 'disponible'
           && request.resource.data.get('takenBy', null) == null
-          && changedOnly(['status', 'takenBy', 'assignStatus', 'assignRespondedAt'])
-          && request.resource.data.get('assignStatus', null) in [resource.data.get('assignStatus', null), 'refusee'])
+          && changedOnly(['status', 'takenBy', 'assignStatus', 'assignRespondedAt', 'assignRefused'])
+          // Course qu'on lui avait envoyée : il passe dans les refus en la relâchant.
+          && request.resource.data.get('assignStatus', null) in [resource.data.get('assignStatus', null), 'refusee']
+          && (request.resource.data.get('assignRefused', []) == resource.data.get('assignRefused', [])
+            || request.resource.data.get('assignRefused', []) == resource.data.get('assignRefused', []).concat([request.auth.token.name])))
       );
     }
 
-    // Course envoyée par le posteur à UN chauffeur (assignedTo) : personne d'autre ne peut
-    // la demander (isClaim) ; le chauffeur choisi l'accepte directement ou la refuse.
+    // Course envoyée par le posteur à un ou plusieurs chauffeurs (assignees ; anciennes
+    // courses : un seul, assignedTo) : personne d'autre ne peut la demander (isClaim).
+    // Chaque chauffeur choisi peut l'accepter -- le premier l'emporte, puisqu'il faut qu'elle
+    // soit encore disponible -- ou la refuser (ajout de son nom à assignRefused).
+    function isAssignedRide(data) {
+      return data.get('assignees', []).size() > 0 || data.get('assignedTo', null) != null;
+    }
     function isAssignee() {
-      return resource.data.get('assignedTo', null) == request.auth.token.name
-        && resource.data.status == 'disponible'
-        && resource.data.get('assignStatus', null) != 'refusee';
+      return resource.data.status == 'disponible'
+        && request.auth.token.name in resource.data.get('assignees', [])
+        && !(request.auth.token.name in resource.data.get('assignRefused', []));
     }
     function isAssigneeAccept() {
       return isAssignee()
@@ -103,8 +111,8 @@ service cloud.firestore {
     }
     function isAssigneeRefuse() {
       return isAssignee()
-        && request.resource.data.assignStatus == 'refusee'
-        && changedOnly(['assignStatus', 'assignRespondedAt']);
+        && request.resource.data.assignRefused == resource.data.get('assignRefused', []).concat([request.auth.token.name])
+        && changedOnly(['assignRefused', 'assignRespondedAt']);
     }
 
     // Corbeille : une course n'est jamais effacée par un chauffeur, seulement marquée

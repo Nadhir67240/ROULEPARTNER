@@ -192,13 +192,13 @@ export function notifyAssignedRide(ride) {
   }
 }
 
-// Le chauffeur choisi a refusé la course (ou l'a relâchée) : elle revient au posteur.
+// Tous les chauffeurs choisis ont refusé (ou relâché) la course : elle revient au posteur.
 export function notifyAssignRefused(ride) {
   playAlertSound(false);
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
   try {
     new Notification("❌ Course refusée", {
-      body: `${ride.assignedTo} ne prend pas ${ride.depart} → ${ride.arrivee} — à toi de choisir la suite.`,
+      body: `Personne n'a accepté ${ride.depart} → ${ride.arrivee} — à toi de choisir la suite.`,
       icon: "/icon-192.png",
       tag: `${ride.id}-refused`,
     });

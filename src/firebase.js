@@ -23,6 +23,7 @@ import {
   connectFirestoreEmulator,
   serverTimestamp,
   deleteField,
+  arrayUnion,
   FieldPath,
 } from "firebase/firestore";
 import {
@@ -278,6 +279,45 @@ export async function archiveRide(id, byName) {
 
 export async function restoreRide(id) {
   await updateDoc(doc(ridesCol, id), { deleted: deleteField(), deletedBy: deleteField(), deletedAt: deleteField() });
+}
+
+// --- Course envoyée à un ou plusieurs chauffeurs choisis ---
+// assignees : chauffeurs à qui elle est proposée (le premier qui accepte l'obtient),
+// assignRefused : ceux qui l'ont refusée (ou relâchée). Anciennes courses : un seul
+// chauffeur dans assignedTo, refus noté assignStatus "refusee".
+export const rideAssignees = (r) =>
+  Array.isArray(r?.assignees) ? r.assignees : r?.assignedTo ? [r.assignedTo] : [];
+export const rideAssignRefused = (r) =>
+  Array.isArray(r?.assignRefused) ? r.assignRefused
+    : r?.assignStatus === "refusee" && r?.assignedTo ? [r.assignedTo] : [];
+export const isAssignedRide = (r) => rideAssignees(r).length > 0;
+// Chauffeurs choisis qui n'ont pas (encore) refusé.
+export const rideAssigneesPending = (r) => {
+  const refused = rideAssignRefused(r);
+  return rideAssignees(r).filter((n) => !refused.includes(n));
+};
+
+export async function refuseAssignedRide(id, driverName) {
+  await updateDoc(doc(ridesCol, id), { assignRefused: arrayUnion(driverName), assignRespondedAt: Date.now() });
+}
+
+// Le preneur relâche une course qu'on lui avait envoyée : il passe dans les refus, elle
+// repart aux autres chauffeurs choisis (ou revient au posteur s'il n'y en a plus).
+export async function releaseAssignedRide(ride, driverName) {
+  const ref = doc(ridesCol, ride.id);
+  if (Array.isArray(ride.assignees)) {
+    await updateDoc(ref, { status: "disponible", takenBy: null, assignRefused: arrayUnion(driverName), assignRespondedAt: Date.now() });
+  } else {
+    await updateDoc(ref, { status: "disponible", takenBy: null, assignStatus: "refusee", assignRespondedAt: Date.now() });
+  }
+}
+
+// Le posteur renvoie la course à une nouvelle liste de chauffeurs, ou la publie à tous (names vide).
+export async function sendRideToDrivers(id, names) {
+  const legacy = { assignedTo: deleteField(), assignStatus: deleteField() };
+  await updateDoc(doc(ridesCol, id), names.length
+    ? { ...legacy, assignees: names, assignRefused: [], assignRespondedAt: null }
+    : { ...legacy, assignees: deleteField(), assignRefused: deleteField(), assignRespondedAt: deleteField() });
 }
 
 // Effacement définitif (course + bon) : réservé à l'admin par les règles.
