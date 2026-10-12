@@ -68,18 +68,18 @@ export function computeTaxiConventionneTarif({ distKm, allerRetour, kmRate, gran
   return Math.round(total * 100) / 100;
 }
 
-// Détecte automatiquement si l'heure de prise en charge tombe dans la plage
-// "nuit/dimanche" de la convention (20h-8h, ou samedi à partir de 12h, ou dimanche).
-// Les jours fériés ne peuvent pas être détectés automatiquement (pas de calendrier
-// intégré) — le chauffeur garde la main pour cocher/décocher manuellement ensuite.
-export function autoDetectNightWeekend(heureStr) {
-  if (!heureStr) return false;
-  const [h] = heureStr.split(":").map(Number);
-  if (Number.isNaN(h)) return false;
-  const day = new Date().getDay(); // 0 = dimanche, 6 = samedi
-  const isNight = h >= 20 || h < 8;
-  const isWeekend = day === 0 || (day === 6 && h >= 12);
-  return isNight || isWeekend;
+// Détecte automatiquement si la prise en charge tombe dans la plage "nuit/dimanche/férié"
+// de la convention (20h-8h, samedi à partir de 12h, dimanche, jour férié), d'après la date
+// ET l'heure DE LA COURSE (avant : le jour où le formulaire était rempli). Jours fériés :
+// calendrier d'Alsace-Moselle (isJourFerieAlsace). Le chauffeur garde la main pour corriger.
+export function autoDetectNightWeekend(heureStr, dateKeyStr) {
+  const [h] = String(heureStr || "").split(":").map(Number);
+  const [y, m, d] = String(dateKeyStr || "").split("-").map(Number);
+  const day = y && m && d ? new Date(y, m - 1, d).getDay() : null; // 0 = dimanche, 6 = samedi
+  const hasHour = !!heureStr && Number.isFinite(h);
+  const isNight = hasHour && (h >= 20 || h < 8);
+  const isWeekend = day === 0 || (day === 6 && hasHour && h >= 12);
+  return isNight || isWeekend || isJourFerieAlsace(dateKeyStr);
 }
 
 // Extrait la commune et le département d'un résultat de recherche d'adresse (Nominatim ou BAN,
@@ -142,4 +142,70 @@ export const GRANDE_VILLE_EXTENSION_MATCHERS = [
 export function matchesGrandeVilleExtension(addressText) {
   const norm = stripAccents((addressText || "").toLowerCase());
   return GRANDE_VILLE_EXTENSION_MATCHERS.some((group) => group.every((kw) => norm.includes(kw)));
+}
+
+// --- Course payante (taxi non conventionné) : tarifs préfectoraux du Bas-Rhin 2026 ---
+// Grille confirmée par l'utilisateur (affichage obligatoire dans le taxi, arrêté préfectoral
+// du 26/01/2026), dans les plafonds de l'arrêté national du 24/12/2025 (4,48 € de prise en
+// charge, 1,30 €/km de base, 42,15 €/h, 8 € minimum). À mettre à jour à chaque nouvel arrêté.
+export const TAXI_PAYANT_PEC = 3.1;
+export const TAXI_PAYANT_KM_RATES = { A: 1.01, B: 1.43, C: 2.0, D: 2.85 };
+export const TAXI_PAYANT_HEURE_ATTENTE = 37.8;
+export const TAXI_PAYANT_MINIMUM = 8.0; // suppléments inclus
+export const TAXI_PAYANT_BAGAGE = 2.0; // par bagage qui ne tient pas sur les genoux
+export const TAXI_PAYANT_PASSAGER_SUP = 4.0; // par passager à partir du 5e
+export const TAXI_PAYANT_PASSAGERS_INCLUS = 4;
+export const TAXI_PAYANT_JOUR_DEBUT = 7; // jour : 7h-19h en semaine
+export const TAXI_PAYANT_JOUR_FIN = 19;
+
+// Dimanche de Pâques (algorithme de Meeus/Jones/Butcher), en date locale.
+function easterSunday(year) {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+// Jours fériés en Alsace-Moselle : les 11 fériés nationaux + Vendredi saint et 26 décembre.
+export function isJourFerieAlsace(dateKeyStr) {
+  const [y, m, d] = String(dateKeyStr || "").split("-").map(Number);
+  if (!y || !m || !d) return false;
+  const md = `${m}-${d}`;
+  if (["1-1", "5-1", "5-8", "7-14", "8-15", "11-1", "11-11", "12-25", "12-26"].includes(md)) return true;
+  const easter = easterSunday(y);
+  const target = new Date(y, m - 1, d).getTime();
+  const offsetDay = (n) => new Date(easter.getFullYear(), easter.getMonth(), easter.getDate() + n).getTime();
+  // Vendredi saint, lundi de Pâques, Ascension, lundi de Pentecôte.
+  return [-2, 1, 39, 50].some((n) => offsetDay(n) === target);
+}
+
+// Tarif de nuit (B/D) : de 19h à 7h, et toute la journée les dimanches et jours fériés.
+// Basé sur la date et l'heure DE LA COURSE.
+export function isTaxiPayantNuit(dateKeyStr, heureStr) {
+  const [h] = String(heureStr || "").split(":").map(Number);
+  const [y, m, d] = String(dateKeyStr || "").split("-").map(Number);
+  const nuit = Number.isFinite(h) && (h >= TAXI_PAYANT_JOUR_FIN || h < TAXI_PAYANT_JOUR_DEBUT);
+  const dimanche = y && m && d ? new Date(y, m - 1, d).getDay() === 0 : false;
+  return nuit || dimanche || isJourFerieAlsace(dateKeyStr);
+}
+
+// Lettre du tarif : A/B quand le taxi revient avec le client (aller-retour, retour en charge),
+// C/D quand il repart à vide (aller simple ou retour seul). B/D = nuit, dimanche, férié.
+export function taxiPayantLettre({ allerRetour, nuit }) {
+  return allerRetour ? (nuit ? "B" : "A") : nuit ? "D" : "C";
+}
+
+// Prix d'une course payante : prise en charge + km × tarif (A/B/C/D) + attente + suppléments,
+// avec le minimum de perception. Aller-retour : les deux trajets au tarif A/B.
+export function computeTaxiPayantTarif({ distKm, allerRetour, nuit, attenteMin = 0, bagages = 0, passagers = 1 }) {
+  if (distKm == null) return null;
+  const lettre = taxiPayantLettre({ allerRetour, nuit });
+  const km = allerRetour ? distKm * 2 : distKm;
+  let total = TAXI_PAYANT_PEC + km * TAXI_PAYANT_KM_RATES[lettre];
+  total += (Math.max(0, Number(attenteMin) || 0) / 60) * TAXI_PAYANT_HEURE_ATTENTE;
+  total += Math.max(0, Number(bagages) || 0) * TAXI_PAYANT_BAGAGE;
+  total += Math.max(0, (Number(passagers) || 1) - TAXI_PAYANT_PASSAGERS_INCLUS) * TAXI_PAYANT_PASSAGER_SUP;
+  return { total: Math.round(Math.max(total, TAXI_PAYANT_MINIMUM) * 100) / 100, lettre };
 }

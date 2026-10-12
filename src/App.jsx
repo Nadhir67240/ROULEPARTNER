@@ -20,7 +20,7 @@ import {
   listenForegroundMessages,
 } from "./firebase";
 import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
-import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
+import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, computeTaxiPayantTarif, isTaxiPayantNuit, TAXI_PAYANT_KM_RATES, TAXI_PAYANT_PEC, TAXI_PAYANT_HEURE_ATTENTE, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
 import { formatPostedAt, dateKey, todayKey, timePlusMinutes, formatRideDate, FRENCH_MONTHS, formatDayMonth, FRENCH_WEEKDAYS_SHORT, keyFromDate, dateFromKey, addDaysKey, startOfWeekKey, rideTimingBadge, thisWeekRange } from "./lib/dates";
 import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyRideModified, notifyNewMessage, notifyAssignedRide, notifyAssignRefused } from "./lib/alerts";
 import { loadRideDraft, saveRideDraft, clearRideDraft, loadRecentAddresses, saveRecentAddress } from "./lib/storage";
@@ -1221,17 +1221,28 @@ export default function App() {
     }));
   };
 
-  // Coche/décoche automatiquement "Nuit/dimanche/férié" dès que l'heure change,
-  // selon la règle de la convention. Le chauffeur peut toujours corriger à la main
-  // ensuite (par exemple pour un jour férié, qu'on ne peut pas détecter tout seul).
+  // Coche/décoche automatiquement "Nuit/dimanche/férié" dès que la date ou l'heure de la
+  // course change, selon la règle de la convention. Le chauffeur peut toujours corriger.
   useEffect(() => {
     if (form.type !== "taxi") return;
     const orig = editOriginalTarifInputs.current;
-    if (orig && orig.heure === form.heure) return; // heure inchangée depuis l'ouverture de la modification
-    const auto = autoDetectNightWeekend(form.heure);
+    // date et heure inchangées depuis l'ouverture de la modification
+    if (orig && orig.heure === form.heure && orig.date === form.date) return;
+    const auto = autoDetectNightWeekend(form.heure, form.date);
     setForm((f) => (f.majorationNuitWeekend === auto ? f : { ...f, majorationNuitWeekend: auto }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.heure, form.type]);
+  }, [form.heure, form.date, form.type]);
+
+  // Course payante : tarif de nuit (B/D) détecté d'après la date ET l'heure de la course
+  // (19h-7h, dimanches, jours fériés d'Alsace-Moselle). Corrigeable à la main ensuite.
+  useEffect(() => {
+    if (form.type !== "taxi_payant") return;
+    const orig = editOriginalTarifInputs.current;
+    if (orig && orig.heure === form.heure && orig.date === form.date) return;
+    const auto = isTaxiPayantNuit(form.date, form.heure);
+    setForm((f) => (f.payantNuit === auto ? f : { ...f, payantNuit: auto }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.heure, form.date, form.type]);
 
   // Coche/décoche automatiquement le forfait "grande ville" dès que le départ ou l'arrivée
   // change, selon la liste officielle (arrêté du 29 juillet 2025) et la liste des établissements
@@ -1261,7 +1272,9 @@ export default function App() {
   // si le service externe ne répond pas.
   const [calculatingTarif, setCalculatingTarif] = useState(false);
   useEffect(() => {
-    if (form.type !== "taxi") return;
+    const payant = form.type === "taxi_payant";
+    if (form.type !== "taxi" && !payant) return;
+    if (payant && form.forfait) return; // forfait : prix libre saisi par le chauffeur, jamais écrasé
     const orig = editOriginalTarifInputs.current;
     if (
       orig &&
@@ -1269,7 +1282,10 @@ export default function App() {
       orig.arriveeLat === form.arriveeLat && orig.arriveeLng === form.arriveeLng &&
       orig.trajet === form.trajet && orig.grandeVille === form.grandeVille &&
       orig.majorationNuitWeekend === form.majorationNuitWeekend &&
-      orig.retourAVide === form.retourAVide && orig.tpmr === form.tpmr
+      orig.retourAVide === form.retourAVide && orig.tpmr === form.tpmr &&
+      orig.payantNuit === form.payantNuit && orig.attenteMin === form.attenteMin &&
+      orig.bagages === form.bagages && orig.passagers === form.passagers &&
+      orig.forfait === form.forfait
     ) {
       return; // rien de tarif-sensible n'a changé depuis l'ouverture de la modification
     }
@@ -1289,7 +1305,18 @@ export default function App() {
         setCalculatingTarif(false);
         return;
       }
-      const computed = computeTaxiConventionneTarif({
+      // Course payante : tarif préfectoral (A/B/C/D). Conventionné : convention CPAM.
+      const paid = payant
+        ? computeTaxiPayantTarif({
+          distKm,
+          allerRetour: form.trajet === "allerRetour",
+          nuit: form.payantNuit,
+          attenteMin: form.attenteMin,
+          bagages: form.bagages,
+          passagers: form.passagers,
+        })
+        : null;
+      const computed = payant ? paid.total : computeTaxiConventionneTarif({
         distKm,
         allerRetour: form.trajet === "allerRetour",
         kmRate,
@@ -1301,6 +1328,7 @@ export default function App() {
       setForm((f) => ({
         ...f,
         tarif: String(computed),
+        tarifLettre: payant ? paid.lettre : "",
         calcDistanceKm: Math.round(distKm * 10) / 10,
         calcIsRoadDistance: isRoadDistance,
       }));
@@ -1314,6 +1342,7 @@ export default function App() {
     form.type, form.trajet, form.departLat, form.departLng,
     form.arriveeLat, form.arriveeLng, form.grandeVille, form.majorationNuitWeekend,
     form.retourAVide, form.tpmr, kmRate,
+    form.payantNuit, form.attenteMin, form.bagages, form.passagers, form.forfait,
   ]);
 
   const handlePhotoChange = async (e) => {
@@ -1375,7 +1404,9 @@ export default function App() {
       departCity: r.departCity || "", departDept: r.departDept || "", arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       depart: r.depart, arrivee: r.arrivee,
       trajet: r.trajet, grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
-      retourAVide: r.retourAVide || false, tpmr: r.tpmr || false, heure: r.heure,
+      retourAVide: r.retourAVide || false, tpmr: r.tpmr || false, heure: r.heure, date: r.date || "",
+      payantNuit: r.payantNuit || false, attenteMin: r.attenteMin || 0, bagages: r.bagages || 0, passagers: r.passagers || 1,
+      forfait: r.forfait || false,
     };
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
@@ -1384,6 +1415,7 @@ export default function App() {
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
+      payantNuit: r.payantNuit || false, attenteMin: r.attenteMin || 0, bagages: r.bagages || 0, passagers: r.passagers || 1, tarifLettre: r.tarifLettre || "", forfait: r.forfait || false,
       ...att,
     });
     setEditingId(r.id);
@@ -1407,6 +1439,7 @@ export default function App() {
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
+      payantNuit: r.payantNuit || false, attenteMin: r.attenteMin || 0, bagages: r.bagages || 0, passagers: r.passagers || 1, tarifLettre: r.tarifLettre || "", forfait: r.forfait || false,
       ...att,
     });
     setEditingId(null);
@@ -2323,7 +2356,7 @@ export default function App() {
               <span style={{ fontWeight: 600, fontSize: 15, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
             </div>
           </div>
-          {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
+          {r.tarif && <span style={styles.tarifTag}>{r.tarif} €{r.forfait ? " · forfait" : ""}</span>}
         </div>
         <div style={styles.metaRow}>
           <span style={styles.metaItem}><Clock size={13} /> {formatRideDate(r.date)} à {r.heure} — {trajetLabel(r.trajet)}</span>
@@ -2388,7 +2421,7 @@ export default function App() {
             {r.status === "terminee" ? " · Terminée" : r.status === "en_cours" ? " · En cours" : r.status === "en_attente" ? " · En attente" : ""}
           </div>
         </div>
-        {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
+        {r.tarif && <span style={styles.tarifTag}>{r.tarif} €{r.forfait ? " · forfait" : ""}</span>}
       </div>
     );
   };
@@ -3479,7 +3512,87 @@ export default function App() {
                           </span>
                         </div>
                       </>
-                    ) : (
+                    ) : form.type === "taxi_payant" ? (() => {
+                      const ar = form.trajet === "allerRetour";
+                      const lettre = form.tarifLettre || (ar ? (form.payantNuit ? "B" : "A") : (form.payantNuit ? "D" : "C"));
+                      const stepper = (label, key, min, hint) => (
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 8 }}>
+                          <span style={{ fontSize: 14, color: "var(--text-tertiary)" }}>
+                            {label}{hint && <span style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)" }}>{hint}</span>}
+                          </span>
+                          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <button type="button" style={styles.iconBtn} aria-label={`Moins — ${label}`}
+                              onClick={() => setForm({ ...form, [key]: Math.max(min, (Number(form[key]) || 0) - (key === "attenteMin" ? 5 : 1)) })}>−</button>
+                            <strong style={{ minWidth: 42, textAlign: "center" }}>{form[key] || 0}{key === "attenteMin" ? " min" : ""}</strong>
+                            <button type="button" style={styles.iconBtn} aria-label={`Plus — ${label}`}
+                              onClick={() => setForm({ ...form, [key]: (Number(form[key]) || 0) + (key === "attenteMin" ? 5 : 1) })}>+</button>
+                          </span>
+                        </div>
+                      );
+                      const modeBtn = (active) => ({
+                        flex: 1, minHeight: 40, borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 13.5,
+                        border: `1.5px solid ${active ? "#FFB43A" : "var(--border-outline)"}`,
+                        background: active ? "#FFB43A" : "transparent", color: active ? "#1A1206" : "var(--text-tertiary)",
+                      });
+                      const modeSwitch = (
+                        <div style={{ display: "flex", gap: 8, marginBottom: 12 }} role="group" aria-label="Mode de tarif">
+                          <button type="button" style={modeBtn(!form.forfait)} onClick={() => setForm({ ...form, forfait: false })}>
+                            Tarif compteur
+                          </button>
+                          <button type="button" style={modeBtn(form.forfait)} onClick={() => setForm({ ...form, forfait: true, tarifLettre: "" })}>
+                            Forfait (prix libre)
+                          </button>
+                        </div>
+                      );
+                      if (form.forfait) {
+                        return (
+                          <>
+                            {modeSwitch}
+                            <label style={styles.formLabel}>
+                              Prix du forfait (€)
+                              <input
+                                style={{ ...styles.input, width: "100%", fontSize: 24, fontWeight: 800, textAlign: "center" }}
+                                inputMode="decimal" placeholder="Ex : 60" value={form.tarif}
+                                onChange={(e) => setForm({ ...form, tarif: e.target.value })}
+                              />
+                              <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 400 }}>
+                                Prix convenu avec le client, sans calcul au compteur.
+                              </span>
+                            </label>
+                          </>
+                        );
+                      }
+                      return (
+                        <>
+                          {modeSwitch}
+                          <label style={styles.checkboxRow}>
+                            <input type="checkbox" checked={form.payantNuit}
+                              onChange={(e) => setForm({ ...form, payantNuit: e.target.checked })} />
+                            Nuit (19h-7h), dimanche ou férié — détecté automatiquement
+                          </label>
+                          {stepper("Passagers", "passagers", 1, "+4 € par passager à partir du 5e")}
+                          {stepper("Bagages volumineux", "bagages", 0, "+2 € par bagage qui ne tient pas sur les genoux")}
+                          {ar && stepper("Attente sur place", "attenteMin", 0, `${TAXI_PAYANT_HEURE_ATTENTE.toFixed(2).replace(".", ",")} €/h`)}
+                          <div style={{ padding: "14px 16px", borderRadius: 14, background: "var(--surface-tile)", marginTop: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                            <input
+                              aria-label="Tarif de la course (€)"
+                              inputMode="decimal"
+                              value={calculatingTarif ? "…" : form.tarif}
+                              onChange={(e) => setForm({ ...form, tarif: e.target.value })}
+                              placeholder="—"
+                              style={{ fontFamily: "'Manrope', sans-serif", fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--text-primary)", background: "transparent", border: "none", textAlign: "center", width: "100%", outline: "none" }}
+                            />
+                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, color: calculatingTarif ? "var(--accent-text)" : "var(--text-muted)", textAlign: "center" }}>
+                              {calculatingTarif ? "calcul en cours…"
+                                : `tarif ${lettre} · ${TAXI_PAYANT_KM_RATES[lettre].toFixed(2).replace(".", ",")} €/km${ar ? " × aller + retour" : ""} · prise en charge ${TAXI_PAYANT_PEC.toFixed(2).replace(".", ",")} €`}
+                            </span>
+                            <span style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
+                              Tarifs préfectoraux Bas-Rhin 2026 · modifiable à la main
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })() : (
                       <label style={styles.formLabel}>
                         Tarif estimé (€)
                         <input style={{ ...styles.input, width: "100%" }} placeholder="Ex: 65" value={form.tarif}
@@ -3706,7 +3819,7 @@ export default function App() {
                       <span style={{ fontWeight: 600, fontSize: 15, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cardLocality(r.arrivee)}</span>
                     </div>
                   </div>
-                  {r.tarif && <span style={styles.tarifTag}>{r.tarif} €</span>}
+                  {r.tarif && <span style={styles.tarifTag}>{r.tarif} €{r.forfait ? " · forfait" : ""}</span>}
                 </div>
 
                 <div style={styles.metaRow}>
@@ -3915,6 +4028,7 @@ export default function App() {
                 {r.tarif && (
                   <div style={styles.modalRow}>
                     <span className="rp-meter" style={{ fontSize: 28 }}>{r.tarif} €</span>
+                    {r.forfait && <span style={{ marginLeft: 8, fontSize: 13, color: "var(--text-muted)" }}>forfait</span>}
                   </div>
                 )}
                 {r.calcDistanceKm != null && (

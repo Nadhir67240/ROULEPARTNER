@@ -75,6 +75,13 @@ export const emptyForm = {
   retourAVide: false,
   calcDistanceKm: null,
   majorationNuitWeekend: false,
+  // Course payante (tarif préfectoral) : nuit/dimanche/férié, attente, suppléments, forfait.
+  payantNuit: false,
+  attenteMin: 0,
+  bagages: 0,
+  passagers: 1,
+  tarifLettre: "",
+  forfait: false, // prix libre, sans calcul au compteur
   notes: "",
   photo: null,
   document: null,

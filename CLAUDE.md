@@ -108,11 +108,16 @@ notification logic).
 **PWA config** (manifest, icons, service-worker registration strategy) lives in
 `vite.config.js` via `vite-plugin-pwa`, separate from the FCM service worker above.
 
-**Taxi fare calculator**: `computeTaxiConventionneTarif()` and the `DEPARTMENT_KM_RATES` /
-`TAXI_*` constants near the top of `App.jsx` encode French "taxi conventionné" pricing rules
-(per-department km rates, night/weekend/TPMR surcharges, empty-return surcharge). These are
-domain/regulatory constants, not arbitrary config — treat changes to them as business-logic
-changes requiring confirmation, not cleanup.
+**Taxi fare calculator** (`src/lib/tarif.js`): `computeTaxiConventionneTarif()` and the
+`DEPARTMENT_KM_RATES` / `TAXI_*` constants encode French "taxi conventionné" pricing rules
+(per-department km rates, night/weekend/TPMR surcharges, empty-return surcharge).
+`computeTaxiPayantTarif()` and the `TAXI_PAYANT_*` constants encode the Bas-Rhin 2026
+prefectoral fares for paid rides (`type: "taxi_payant"`): prise en charge + km × tarif A/B/C/D
+(A/B aller-retour, C/D aller simple; B/D = 19h-7h, Sundays and Alsace-Moselle holidays via
+`isTaxiPayantNuit(date, heure)`), waiting time, luggage / 5th-passenger supplements, 8 € minimum.
+These are domain/regulatory constants, not arbitrary config — treat changes to them as
+business-logic changes requiring confirmation, not cleanup (the paid fares change with each
+yearly prefectoral order).
 
 **Language**: all UI text, most code comments, and several data values (ride status strings,
 etc.) are in French. Match this when adding UI copy or comments.
