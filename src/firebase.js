@@ -7,6 +7,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -358,6 +359,27 @@ export function listenProfiles(callback) {
     });
     callback(profiles);
   });
+}
+
+// Les comptes créés avant le 9/10/2026 n'ont souvent pas de fiche (l'inscription la
+// refusait alors) : ils n'apparaissaient ni dans les listes de chauffeurs ni dans
+// « Envoyer à ». À la connexion, on recrée la fiche manquante à partir du compte et de
+// la licence réservée à ce nom. Ne touche jamais à une fiche existante.
+export async function ensureOwnProfile(user) {
+  const name = user?.displayName;
+  if (!name || !user.email || !user.emailVerified) return false;
+  const ref = doc(profilesCol, name);
+  if ((await getDoc(ref)).exists()) return false;
+  const lic = await getDocs(query(licensesCol, where("owner", "==", name), limit(1)));
+  const l = lic.docs[0];
+  await setDoc(ref, {
+    email: user.email, // même forme qu'à l'inscription (comparée par cleanupDeletedUser)
+    licenseNumber: l ? l.id : "",
+    commune: l ? l.data().commune || "" : "",
+    banned: false,
+    createdAt: Date.parse(user.metadata?.creationTime) || Date.now(),
+  });
+  return true;
 }
 
 export async function setDriverPhone(name, phone) {

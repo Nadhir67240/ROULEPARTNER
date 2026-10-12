@@ -14,7 +14,7 @@ import {
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
   requestEmailChange, updateProfileFields, changeDriverLicense,
-  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth,
+  setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth, ensureOwnProfile,
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
@@ -369,6 +369,11 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverName]);
+
+  // Recrée la fiche des anciens comptes qui n'en ont pas (voir ensureOwnProfile).
+  useEffect(() => {
+    if (user?.emailVerified && driverName) ensureOwnProfile(user).catch(() => {});
+  }, [user, driverName]);
 
   // Le service worker n'affiche les push que si l'appli est en arrière-plan — quand
   // l'onglet est ouvert au premier plan (cas typique pendant qu'un chauffeur regarde
@@ -1427,7 +1432,8 @@ export default function App() {
   };
 
   // Chauffeurs à qui on peut envoyer une course : inscrits, ni bannis ni supprimés, pas moi.
-  const assignableDrivers = Object.keys(profiles)
+  // Les positions rattrapent les anciens comptes sans fiche (purgées avec le compte).
+  const assignableDrivers = [...new Set([...Object.keys(profiles), ...Object.keys(positions)])]
     .filter((n) => n !== driverName && !profiles[n]?.banned && !profiles[n]?.deleted)
     .sort((a, b) => a.localeCompare(b, "fr"));
 
