@@ -2999,13 +2999,16 @@ export default function App() {
                         Pressé ? Publie tout de suite — patient, notes et documents sont facultatifs.
                         {form.tarif && !calculatingTarif && <> Tarif calculé : <strong style={{ color: "var(--text-primary)" }}>{form.tarif} €</strong>.</>}
                       </div>
+                      <div style={{ marginBottom: 10 }}>
+                        {renderDriverPicker(sendToDriver, setSendToDriver, { allLabel: "Envoyer à tous les chauffeurs" })}
+                      </div>
                       <button
                         type="button"
                         disabled={calculatingTarif}
                         onClick={submitRide}
                         style={{ ...styles.btnPrimaryAction, opacity: calculatingTarif ? 0.6 : 1 }}
                       >
-                        <Send size={18} /> {calculatingTarif ? "Calcul du tarif…" : "Publier maintenant"}
+                        <Send size={18} /> {calculatingTarif ? "Calcul du tarif…" : sendToDriver ? `Envoyer à ${sendToDriver}` : "Publier maintenant"}
                       </button>
                     </div>
                   )}
