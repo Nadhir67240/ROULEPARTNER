@@ -72,7 +72,12 @@ The admin user is identified by a hardcoded `ADMIN_EMAIL` constant duplicated in
 ever changes, update all three.
 
 **Ride lifecycle** (`status` field): `disponible` → `en_attente` (claim pending confirmation,
-via `claimRide`'s Firestore transaction to avoid double-claims) → `en_cours` → `terminee`.
+via `claimRide`'s Firestore transaction to avoid double-claims) → `prise` → `en_cours` → `terminee`.
+
+**Ride deletion is soft** (`deleted`/`deletedBy`/`deletedAt`, via `archiveRide`): archived rides
+are hidden everywhere and shown to the admin only, in the "Corbeille" view (restore or hard
+delete). A driver may archive only their own ride while it is still `disponible` and unclaimed;
+after that only the admin can. Hard `delete` on `rides` is admin-only in `firestore.rules`.
 Completed rides older than `AUTO_PURGE_DAYS` are purged client-side (there's no scheduled
 server-side job for this — see the comment in `App.jsx` near the purge effect).
 

@@ -18,13 +18,13 @@ async function reset() {
   await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${PROJECT_ID}/accounts`, { method: "DELETE" });
 }
 
-async function makeUser(name, { verified = true } = {}) {
+async function makeUser(name, { verified = true, email = null } = {}) {
   const app = initializeApp({ apiKey: "demo-key", projectId: PROJECT_ID }, name);
   const auth = getAuth(app);
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
   const db = getFirestore(app);
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
-  const cred = await createUserWithEmailAndPassword(auth, `${name.replace(/\s/g, "")}@test.fr`, "motdepasse123");
+  const cred = await createUserWithEmailAndPassword(auth, email || `${name.replace(/\s/g, "")}@test.fr`, "motdepasse123");
   await updateProfile(cred.user, { displayName: name });
   if (verified) await fetch(`http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:update`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer owner" },
@@ -167,12 +167,56 @@ await expect("posteur retire la photo de la fiche (migration à la modification)
   b.set(doc(poster.db, "rides/b5/prive/bon"), { photo: "data:ancienne", document: null, documentName: "" });
   return b.commit();
 });
-await expect("posteur supprime la course et son bon (même lot)", true, () => {
+await expect("posteur efface réellement la course (hors corbeille)", false, () => {
   const b = writeBatch(poster.db);
   b.delete(doc(poster.db, "rides/b5/prive/bon"));
   b.delete(doc(poster.db, "rides/b5"));
   return b.commit();
 });
+
+// --- Corbeille : suppression = deleted: true, effacement réel réservé à l'admin ---
+const admin = await makeUser("Admin", { email: "taxi-vsl67@hotmail.com" });
+const archive = (u) => ({ deleted: true, deletedBy: u.name, deletedAt: Date.now() });
+await adminSet("d1", baseRide({}));
+await expect("posteur met à la corbeille sa course encore libre", true, () =>
+  updateDoc(doc(poster.db, "rides/d1"), archive(poster)));
+await expect("…puis la modifie alors qu'elle est à la corbeille", false, () =>
+  updateDoc(doc(poster.db, "rides/d1"), { tarif: "50" }));
+await expect("…ou la restaure lui-même", false, () =>
+  updateDoc(doc(poster.db, "rides/d1"), { deleted: deleteField(), deletedBy: deleteField(), deletedAt: deleteField() }));
+await expect("un chauffeur demande une course à la corbeille", false, () =>
+  updateDoc(doc(req.db, "rides/d1"), { status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
+await expect("admin restaure la course", true, () =>
+  updateDoc(doc(admin.db, "rides/d1"), { deleted: deleteField(), deletedBy: deleteField(), deletedAt: deleteField() }));
+await expect("posteur efface réellement sa course libre", false, () => deleteDoc(doc(poster.db, "rides/d1")));
+await expect("autre chauffeur met à la corbeille la course d'un autre", false, () =>
+  updateDoc(doc(other.db, "rides/d1"), archive(other)));
+await expect("posteur met à la corbeille au nom de quelqu'un d'autre", false, () =>
+  updateDoc(doc(poster.db, "rides/d1"), archive(other)));
+await expect("posteur met à la corbeille en modifiant aussi le tarif", false, () =>
+  updateDoc(doc(poster.db, "rides/d1"), { ...archive(poster), tarif: "1" }));
+
+for (const [id, over, label] of [
+  ["d2", { status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: new Date() }, "demandée"],
+  ["d3", { status: "prise", takenBy: "Demandeur" }, "prise"],
+  ["d4", { status: "en_cours", takenBy: "Demandeur" }, "en cours"],
+  ["d5", { status: "terminee", takenBy: "Demandeur" }, "terminée"],
+]) {
+  await adminSet(id, baseRide(over));
+  await expect(`posteur met à la corbeille sa course ${label}`, false, () =>
+    updateDoc(doc(poster.db, `rides/${id}`), archive(poster)));
+}
+await expect("posteur « reprend » une course prise (pour la supprimer ensuite)", false, () =>
+  updateDoc(doc(poster.db, "rides/d3"), { status: "disponible", takenBy: null }));
+await expect("posteur passe une course prise en terminée", false, () =>
+  updateDoc(doc(poster.db, "rides/d3"), { status: "terminee" }));
+await expect("posteur modifie le tarif d'une course prise", true, () =>
+  updateDoc(doc(poster.db, "rides/d3"), { tarif: "42" }));
+await expect("preneur met à la corbeille la course prise", false, () =>
+  updateDoc(doc(req.db, "rides/d3"), archive(req)));
+await expect("admin met à la corbeille une course terminée", true, () =>
+  updateDoc(doc(admin.db, "rides/d5"), archive(admin)));
+await expect("admin efface définitivement une course", true, () => deleteDoc(doc(admin.db, "rides/d5")));
 
 // --- Fiche profil à l'inscription (email pas encore confirmé) ---
 const nouveau = await makeUser("Nouveau", { verified: false });

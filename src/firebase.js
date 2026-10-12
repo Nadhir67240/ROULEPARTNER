@@ -215,7 +215,7 @@ export function listenMyRides(driverName, callback) {
     [...posted, ...taken].forEach((r) => byId.set(r.id, r));
     callback([...byId.values()]);
   };
-  const toRides = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const toRides = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => !r.deleted);
   const unsubPosted = onSnapshot(query(ridesCol, where("postedBy", "==", driverName)), (snap) => {
     posted = toRides(snap);
     emit();
@@ -268,6 +268,18 @@ export async function updateRide(id, patch) {
   await batch.commit();
 }
 
+// Corbeille : la course est seulement marquée supprimée (masquée pour tous), l'admin peut
+// la restaurer. Les règles n'autorisent un chauffeur à le faire que sur SA course encore
+// disponible (ni demandée ni prise) ; l'admin, sur n'importe laquelle.
+export async function archiveRide(id, byName) {
+  await updateDoc(doc(ridesCol, id), { deleted: true, deletedBy: byName, deletedAt: Date.now() });
+}
+
+export async function restoreRide(id) {
+  await updateDoc(doc(ridesCol, id), { deleted: deleteField(), deletedBy: deleteField(), deletedAt: deleteField() });
+}
+
+// Effacement définitif (course + bon) : réservé à l'admin par les règles.
 export async function deleteRide(id) {
   const batch = writeBatch(db);
   batch.delete(rideAttachmentRef(id));

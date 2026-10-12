@@ -242,9 +242,9 @@ exports.notifyNewRide = onDocumentCreated(
     if (priorityNames.length > 0) {
       await sleep(PRIORITY_WINDOW_MS);
 
-      // La course a pu être prise pendant l'attente : dans ce cas, on n'envoie rien.
+      // La course a pu être prise (ou mise à la corbeille) pendant l'attente : on n'envoie rien.
       const fresh = await snap.ref.get();
-      if (!fresh.exists || fresh.data().status !== "disponible") return;
+      if (!fresh.exists || fresh.data().status !== "disponible" || fresh.data().deleted) return;
     }
 
     const others = await allTokensExcept([ride.postedBy, ...priorityNames]);
@@ -333,7 +333,7 @@ async function sendPickupReminders(now = Date.now()) {
   const due = [];
   snap.forEach((doc) => {
     const r = doc.data();
-    if (!r.takenBy || !r.date || !r.heure || r.reminderSentAt) return;
+    if (!r.takenBy || !r.date || !r.heure || r.reminderSentAt || r.deleted) return;
     const pickupAt = parisTimeToUtcMs(r.date, r.heure);
     if (pickupAt == null) return;
     const lead = pickupAt - now;

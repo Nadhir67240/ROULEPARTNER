@@ -2,14 +2,14 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
-  Car, MapPin, Clock, User, Plus, Check, Trash2, Siren,
+  Car, MapPin, Clock, User, Plus, Check, Trash2, Siren, RotateCcw,
   Stethoscope, X, Navigation, Timer, LogOut, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
   Phone, List, Map as MapIcon, History, CalendarDays,
   FileText, Camera, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
   Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
 } from "lucide-react";
 import {
-  listenRides, listenMyRides, addRide, updateRide, deleteRide, claimRide, getRideAttachment,
+  listenRides, listenMyRides, addRide, updateRide, deleteRide, archiveRide, restoreRide, claimRide, getRideAttachment,
   listenPositions, setDriverPosition, clearDriverPosition,
   listenProfiles, setDriverPhone,
   listenMessages, sendMessage, listenMessagesForRides,
@@ -134,6 +134,8 @@ export default function App() {
   };
   const driverName = user?.displayName || "";
   const [rides, setRides] = useState([]);
+  // Courses mises à la corbeille (deleted: true) : masquées partout, visibles par l'admin seul.
+  const [deletedRides, setDeletedRides] = useState([]);
   const [myRides, setMyRides] = useState([]); // historique complet du chauffeur (listenMyRides)
   const [positions, setPositions] = useState({});
   const [profiles, setProfiles] = useState({});
@@ -741,7 +743,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const unsubRides = listenRides((newRides) => {
+    const unsubRides = listenRides((allRides) => {
+      const newRides = allRides.filter((r) => !r.deleted);
+      setDeletedRides(allRides.filter((r) => r.deleted));
       if (!firstLoad.current) {
         newRides.forEach((r) => {
           const prevInfo = knownRideIds.current.get(r.id);
@@ -883,15 +887,17 @@ export default function App() {
   // Mesure partielle de protection des données : purge automatiquement les courses
   // terminées depuis plus de AUTO_PURGE_DAYS (photo et notes incluses). Ce n'est pas
   // une vraie purge serveur planifiée (ça demanderait un service payant), donc ça ne
-  // se déclenche que si au moins un chauffeur a l'appli ouverte.
+  // se déclenche que quand l'admin a l'appli ouverte.
   useEffect(() => {
+    // Effacement définitif : seul l'admin y a droit (règles Firestore).
+    if (!isAdmin) return;
     const cutoff = Date.now() - AUTO_PURGE_DAYS * 24 * 60 * 60 * 1000;
     ridesRef.current.forEach((r) => {
       if (r.status === "terminee" && r.createdAt < cutoff) {
         deleteRide(r.id).catch(() => {});
       }
     });
-  }, [rides]);
+  }, [rides, isAdmin]);
 
   // Photo / PDF du bon de la course ouverte, chargés d'avance (seulement si on y a droit :
   // posteur, demandeur ou preneur) pour que le bouton les ouvre tout de suite — un
@@ -1532,7 +1538,31 @@ export default function App() {
     }
   };
 
+  // Supprimer = mettre à la corbeille (récupérable par l'admin). Un chauffeur ne peut
+  // retirer que sa course encore libre ; dès qu'elle est demandée, prise ou terminée,
+  // seul l'admin peut la supprimer (mêmes conditions dans firestore.rules).
+  const canRemoveRide = (r) =>
+    isAdmin || (r.postedBy === driverName && r.status === "disponible" && !r.pendingBy && !r.takenBy);
+
   const remove = async (id) => {
+    try {
+      await archiveRide(id, driverName);
+    } catch (e) {
+      setError(e.code === "permission-denied"
+        ? "Cette course a déjà été demandée ou prise : seul l'administrateur peut la supprimer."
+        : "Échec de la suppression.");
+    }
+  };
+
+  const restore = async (id) => {
+    try {
+      await restoreRide(id);
+    } catch (e) {
+      setError("Échec de la restauration.");
+    }
+  };
+
+  const removeForever = async (id) => {
     try {
       await deleteRide(id);
     } catch (e) {
@@ -1900,6 +1930,7 @@ export default function App() {
     { id: "carte", label: "Carte", icon: MapIcon },
     { id: "historique", label: "Historique", icon: History },
     { id: "toutes", label: "Toutes", icon: List },
+    ...(isAdmin ? [{ id: "corbeille", label: `Corbeille (${deletedRides.length})`, icon: Trash2 }] : []),
   ];
   const activeViewTab = viewTabs.find((t) => t.id === filter);
   const hasActiveFilters = !!dateFilter || radiusFilter !== "all" || !!activeViewTab;
@@ -3065,6 +3096,43 @@ export default function App() {
           </p>
           <div ref={mapContainerRef} style={styles.mapContainer} />
         </main>
+      ) : filter === "corbeille" && isAdmin ? (
+        <main style={styles.board}>
+          {deletedRides.length === 0 ? (
+            <div style={styles.emptyState}>
+              <p style={{ color: "var(--text-muted)", fontSize: 14 }}>La corbeille est vide.</p>
+            </div>
+          ) : (
+            [...deletedRides].sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0)).map((r) => (
+              <div key={r.id} style={styles.card}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)" }}>
+                  {r.depart} → {r.arrivee}
+                </div>
+                <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 4 }}>
+                  {r.date} à {r.heure} · publiée par {r.postedBy}
+                  {r.takenBy ? ` · prise par ${r.takenBy}` : ""} · {r.status}
+                </div>
+                <div style={{ fontSize: 12.5, color: "#E5484D", marginTop: 4 }}>
+                  Supprimée par {r.deletedBy || "?"}
+                  {r.deletedAt ? ` le ${new Date(r.deletedAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}` : ""}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                  <button onClick={() => restore(r.id)} style={styles.btnUtilityAction}>
+                    <RotateCcw size={14} /> Restaurer
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Supprimer DÉFINITIVEMENT cette course ? Elle ne pourra plus être récupérée.")) removeForever(r.id);
+                    }}
+                    style={{ ...styles.btnUtilityAction, color: "#E5484D", borderColor: "#E5484D" }}
+                  >
+                    <Trash2 size={14} /> Supprimer définitivement
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </main>
       ) : (
       <main style={styles.board}>
         {visibleRides.length === 0 ? (
@@ -3269,11 +3337,11 @@ export default function App() {
                         <Check size={14} style={{ marginRight: 4 }} /> Terminer
                       </button>
                     )}
-                    {(mine || isAdmin) && (
+                    {canRemoveRide(r) && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm("Supprimer définitivement cette course ?")) remove(r.id);
+                          if (window.confirm("Supprimer cette course ?")) remove(r.id);
                         }}
                         style={styles.iconBtn}
                         title="Supprimer"
@@ -3572,10 +3640,10 @@ export default function App() {
                       <Pencil size={14} /> Modifier
                     </button>
                   )}
-                  {(mine || isAdmin) && (
+                  {canRemoveRide(r) && (
                     <button
                       onClick={() => {
-                        if (window.confirm("Supprimer définitivement cette course ?")) {
+                        if (window.confirm("Supprimer cette course ?")) {
                           remove(r.id);
                           setSelectedRide(null);
                         }

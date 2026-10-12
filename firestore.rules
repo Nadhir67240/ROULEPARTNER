@@ -86,6 +86,44 @@ service cloud.firestore {
       );
     }
 
+    // Corbeille : une course n'est jamais effacée par un chauffeur, seulement marquée
+    // deleted (récupérable par l'admin). Le posteur ne peut la retirer que tant que
+    // personne ne l'a demandée ni prise ; ensuite (prise, en cours, terminée), seul l'admin.
+    function isDeleted(data) {
+      return data.get('deleted', false) == true;
+    }
+    function deletionUnchanged() {
+      return request.resource.data.get('deleted', false) == resource.data.get('deleted', false)
+        && request.resource.data.get('deletedBy', null) == resource.data.get('deletedBy', null)
+        && request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null);
+    }
+    function isPosterArchive() {
+      return resource.data.postedBy == request.auth.token.name
+        && resource.data.status == 'disponible'
+        && resource.data.get('pendingBy', null) == null
+        && resource.data.get('takenBy', null) == null
+        && request.resource.data.deleted == true
+        && request.resource.data.deletedBy == request.auth.token.name
+        && changedOnly(['deleted', 'deletedBy', 'deletedAt']);
+    }
+    // Le posteur modifie sa course (trajet, tarif, notes...) sans toucher à qui la fait,
+    // ou répond à une demande : confirmer (en_attente -> prise) ou refuser (-> disponible).
+    // Il ne peut pas "reprendre" une course déjà prise pour la retirer ensuite.
+    function isPosterAction() {
+      return resource.data.postedBy == request.auth.token.name && (
+        (request.resource.data.status == resource.data.status
+          && request.resource.data.get('takenBy', null) == resource.data.get('takenBy', null)
+          && request.resource.data.get('pendingBy', null) == resource.data.get('pendingBy', null))
+        || (resource.data.status == 'en_attente' && request.resource.data.status == 'prise'
+          && request.resource.data.takenBy == resource.data.pendingBy
+          && request.resource.data.get('pendingBy', null) == null
+          && changedOnly(['status', 'takenBy', 'pendingBy', 'pendingSince', 'pendingAt']))
+        || (resource.data.status == 'en_attente' && request.resource.data.status == 'disponible'
+          && request.resource.data.get('pendingBy', null) == null
+          && changedOnly(['status', 'pendingBy', 'pendingSince', 'pendingAt']))
+      );
+    }
+
     // Photo / PDF du bon : jamais dans la fiche de la course (lisible par tous), seulement
     // dans rides/{id}/prive/bon. Les anciennes courses qui les contiennent encore peuvent
     // les garder tels quels ou les retirer, mais pas en ajouter de nouveaux.
@@ -106,16 +144,21 @@ service cloud.firestore {
         && !('document' in request.resource.data)
         && !('documentName' in request.resource.data)
       );
-      allow delete: if isAdmin() || (isVerified() && !isBanned() && resource.data.postedBy == request.auth.token.name);
-      // Le posteur garde la main sur sa course (modifier, confirmer, refuser...). Les autres
-      // chauffeurs n'ont droit qu'aux gestes prévus par l'appli, champ par champ :
+      // Effacement réel : admin uniquement (les chauffeurs passent par la corbeille).
+      allow delete: if isAdmin();
+      // Chaque chauffeur n'a droit qu'aux gestes prévus par l'appli, champ par champ.
+      // Une course dans la corbeille ne bouge plus (sauf restauration par l'admin).
       allow update: if isAdmin() || (
-        isVerified() && !isBanned() && priorityFieldsUnchanged() && noInlineAttachment() && (
-          resource.data.postedBy == request.auth.token.name
-          || isClaim()
-          || isRequesterCancel()
-          || isRequesterAutoConfirm()
-          || isTakerAction()
+        isVerified() && !isBanned() && !isDeleted(resource.data)
+        && priorityFieldsUnchanged() && noInlineAttachment() && (
+          isPosterArchive()
+          || (deletionUnchanged() && (
+            isPosterAction()
+            || isClaim()
+            || isRequesterCancel()
+            || isRequesterAutoConfirm()
+            || isTakerAction()
+          ))
         )
       );
 
