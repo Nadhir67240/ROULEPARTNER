@@ -621,8 +621,8 @@ exports.cleanupDeletedUser = functionsV1.region("europe-west1").auth.user().onDe
 });
 
 // Réservé à l'admin. Rattrape les comptes supprimés avant la mise en place de
-// cleanupDeletedUser : efface les fiches/positions qui ne correspondent plus à aucun
-// compte Auth, et renvoie la liste des chauffeurs qui existent réellement.
+// cleanupDeletedUser : efface les fiches/positions/jetons/licences qui ne correspondent plus
+// à aucun compte Auth, et renvoie la liste des chauffeurs qui existent réellement.
 exports.syncDriversWithAuth = onCall({ timeoutSeconds: 60 }, async (request) => {
   if (request.auth?.token?.email !== ADMIN_EMAIL) {
     throw new HttpsError("permission-denied", "Réservé à l'administrateur.");
@@ -669,6 +669,16 @@ exports.syncDriversWithAuth = onCall({ timeoutSeconds: 60 }, async (request) => 
       await purgeDriverData(d.id);
       if (!removed.includes(d.id)) removed.push(d.id);
     }
+  }
+  // Licences réservées par un chauffeur disparu (comptes supprimés avant cleanupDeletedUser) :
+  // sans ça, son numéro resterait bloqué pour toute nouvelle inscription.
+  const licensesSnap = await db.collection("licenses").get();
+  for (const d of licensesSnap.docs) {
+    const owner = d.data().owner;
+    if (owner && (kept.includes(owner) || exists(owner, null))) continue;
+    await d.ref.delete();
+    const label = owner || `licence ${d.id}`;
+    if (!removed.includes(label)) removed.push(label);
   }
   // activeNames : tous les chauffeurs qui ont encore un compte (fiche ou nom Auth).
   return { removed, activeNames: [...new Set([...kept, ...authDisplayNames])], authUserCount: authEmails.size };
