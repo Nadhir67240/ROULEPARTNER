@@ -142,6 +142,9 @@ export default function App() {
   // Course à renvoyer : id de la course dont le posteur choisit d'autres destinataires.
   const [reassignRideId, setReassignRideId] = useState(null);
   const [reassignSel, setReassignSel] = useState([]);
+  // Fenêtre de choix des chauffeurs : { sel, onDone, allLabel } pendant qu'elle est ouverte.
+  const [driverPicker, setDriverPicker] = useState(null);
+  const [driverSearch, setDriverSearch] = useState("");
   const [myRides, setMyRides] = useState([]); // historique complet du chauffeur (listenMyRides)
   const [positions, setPositions] = useState({});
   const [profiles, setProfiles] = useState({});
@@ -1447,34 +1450,50 @@ export default function App() {
 
   // Chauffeurs à qui on peut envoyer une course : inscrits, ni bannis ni supprimés, pas moi.
   // Les positions rattrapent les anciens comptes sans fiche (purgées avec le compte).
+  // En service = position partagée récemment ; ceux-là d'abord, puis ordre alphabétique.
+  const isDriverOnDuty = (n) => !!positions[n]?.updatedAt && Date.now() - positions[n].updatedAt < POSITION_FRESH_MS;
   const assignableDrivers = [...new Set([...Object.keys(profiles), ...Object.keys(positions)])]
     .filter((n) => n !== driverName && !profiles[n]?.banned && !profiles[n]?.deleted)
-    .sort((a, b) => a.localeCompare(b, "fr"));
+    .sort((a, b) => (isDriverOnDuty(b) - isDriverOnDuty(a)) || a.localeCompare(b, "fr"));
 
-  // Choix des chauffeurs en pastilles à cocher (plusieurs possibles). allLabel : pastille
-  // « tout le monde » qui vide la sélection (absente quand il faut au moins un chauffeur).
+  // Champ « Envoyer à » : résumé du choix + petites étiquettes retirables. Le choix lui-même
+  // se fait dans une fenêtre avec recherche et liste à cocher (driverPicker), lisible même
+  // avec des dizaines de chauffeurs. allLabel : libellé quand personne n'est choisi
+  // (publication à tous) ; null = au moins un chauffeur obligatoire.
   const renderDriverPicker = (selected, onChange, { allLabel }) => {
-    const pill = (active) => ({
-      ...styles.togglePill,
-      borderColor: active ? "#FFB43A" : "var(--border-outline)",
-      color: active ? "#1A1206" : "var(--text-tertiary)",
-      background: active ? "#FFB43A" : "transparent",
-    });
-    const toggle = (n) => onChange(selected.includes(n) ? selected.filter((x) => x !== n) : [...selected, n]);
+    const open = (e) => {
+      e.stopPropagation();
+      setDriverSearch("");
+      setDriverPicker({ sel: selected, onDone: onChange, allLabel });
+    };
+    const summary = selected.length === 0
+      ? allLabel || "Choisir des chauffeurs…"
+      : selected.length <= 2 ? namesLabel(selected) : `${selected.length} chauffeurs choisis`;
     return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-        {allLabel && (
-          <button type="button" onClick={() => onChange([])} style={pill(selected.length === 0)}>
-            <Users size={13} style={{ marginRight: 4 }} /> {allLabel}
-          </button>
-        )}
-        {assignableDrivers.map((n) => (
-          <button type="button" key={n} onClick={() => toggle(n)} style={pill(selected.includes(n))}>
-            {selected.includes(n) && <Check size={13} style={{ marginRight: 4 }} />}{n}
-          </button>
-        ))}
-        {assignableDrivers.length === 0 && (
-          <span style={{ fontSize: 12.5, color: "var(--text-muted)" }}>Aucun autre chauffeur inscrit.</span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          onClick={open}
+          style={{ ...styles.input, width: "100%", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textAlign: "left", fontSize: 15 }}
+        >
+          <Users size={16} color={selected.length ? "#FFB43A" : "var(--text-muted)"} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: selected.length ? 700 : 500 }}>
+            {summary}
+          </span>
+          <ChevronRight size={16} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+        </button>
+        {selected.length > 2 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {selected.map((n) => (
+              <span key={n} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600, padding: "4px 6px 4px 10px", borderRadius: 999, background: "rgba(255,180,58,0.14)", color: "var(--accent-text)" }}>
+                {n}
+                <button type="button" onClick={() => onChange(selected.filter((x) => x !== n))} aria-label={`Retirer ${n}`}
+                  style={{ background: "none", border: "none", padding: 2, cursor: "pointer", display: "flex", color: "inherit" }}>
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
         )}
       </div>
     );
@@ -2387,6 +2406,87 @@ export default function App() {
       {/* Alerte course prioritaire — s'affiche par-dessus n'importe quel écran
           de l'appli (accueil, carte, messages, compte...) sans faire sortir le
           chauffeur de ce qu'il était en train de faire. */}
+      {driverPicker && (() => {
+        const { sel, allLabel } = driverPicker;
+        const fold = (s) => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+        const q = fold(driverSearch.trim());
+        const shown = q ? assignableDrivers.filter((n) => fold(n).includes(q)) : assignableDrivers;
+        const setSel = (next) => setDriverPicker({ ...driverPicker, sel: next });
+        const toggle = (n) => setSel(sel.includes(n) ? sel.filter((x) => x !== n) : [...sel, n]);
+        const close = () => setDriverPicker(null);
+        const done = () => { driverPicker.onDone(sel); close(); };
+        const canValidate = sel.length > 0 || !!allLabel;
+        return (
+          <div style={{ ...styles.modalOverlay, zIndex: 260, alignItems: "flex-end", padding: 0 }} onClick={close}>
+            <div
+              style={{ ...styles.modalCard, maxWidth: 480, borderRadius: "16px 16px 0 0", padding: 20, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ ...styles.modalHeader, marginBottom: 12 }}>
+                <h2 style={{ ...styles.modalTitle, margin: 0 }}>
+                  Envoyer à{sel.length > 0 && <span style={{ color: "var(--accent-text)" }}> · {sel.length}</span>}
+                </h2>
+                <button type="button" onClick={close} style={styles.iconBtn}><X size={16} /></button>
+              </div>
+              <input
+                style={{ ...styles.input, width: "100%", marginBottom: 10 }}
+                placeholder={`Rechercher parmi ${assignableDrivers.length} chauffeurs…`}
+                value={driverSearch}
+                onChange={(e) => setDriverSearch(e.target.value)}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "var(--text-muted)", marginBottom: 6 }}>
+                <span>{q ? `${shown.length} résultat${shown.length > 1 ? "s" : ""}` : "Les chauffeurs en service d'abord"}</span>
+                {sel.length > 0 && (
+                  <button type="button" onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--accent-text)", fontWeight: 700, cursor: "pointer", fontSize: 12.5 }}>
+                    Tout décocher
+                  </button>
+                )}
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", margin: "0 -6px", minHeight: 120 }}>
+                {shown.map((n) => {
+                  const checked = sel.includes(n);
+                  const onDuty = isDriverOnDuty(n);
+                  return (
+                    <label key={n} style={{
+                      display: "flex", alignItems: "center", gap: 12, padding: "12px 10px", borderRadius: 10, cursor: "pointer",
+                      background: checked ? "rgba(255,180,58,0.10)" : "transparent",
+                    }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggle(n)}
+                        style={{ width: 20, height: 20, accentColor: "#FFB43A", flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 15, fontWeight: checked ? 700 : 500, color: "var(--text-primary)" }}>
+                        {n}
+                      </span>
+                      {onDuty && (
+                        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--positive-text)", flexShrink: 0 }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3BD07A" }} /> en service
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+                {shown.length === 0 && (
+                  <p style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13.5, padding: "20px 0" }}>
+                    {assignableDrivers.length === 0 ? "Aucun autre chauffeur inscrit." : "Aucun chauffeur ne correspond."}
+                  </p>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, paddingTop: 12, borderTop: "1px solid var(--border-outline)", marginTop: 8 }}>
+                <button type="button" onClick={close} style={{ ...styles.btnGhost, minHeight: 50 }}>Annuler</button>
+                <button
+                  type="button"
+                  disabled={!canValidate}
+                  onClick={done}
+                  style={{ ...styles.btnPrimary, flex: 1, minHeight: 50, justifyContent: "center", opacity: canValidate ? 1 : 0.5 }}
+                >
+                  {sel.length === 0 ? (allLabel ? "Tous les chauffeurs" : "Choisis au moins un chauffeur")
+                    : `Valider (${sel.length} chauffeur${sel.length > 1 ? "s" : ""})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {priorityAlert && (() => {
         const r = priorityAlert.ride;
         const meta = typeMeta(r.type);
