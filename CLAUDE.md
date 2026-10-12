@@ -49,7 +49,8 @@ that `App.jsx` calls directly — there is no separate data layer/store.
 (live driver GPS, keyed by driver name), `profiles` (keyed by driver display name),
 `messages` (per-ride chat), `licenses` (taxi license numbers reserved as doc IDs to enforce
 uniqueness at signup), `fcmTokens`, `driverGroups` (each driver's private named groups of
-drivers, `{ groups: [{ id, name, members }] }`, readable only by its owner; used as shortcuts in
+drivers, `{ groups: [{ id, name, members }] }`, readable only by its owner; managed in Compte →
+"Mes groupes de chauffeurs", used as shortcuts in
 the "Envoyer à" picker). Driver **display name**, not UID, is used as the primary
 key/identity across collections (profiles, positions, chat participants, ban/delete logic).
 

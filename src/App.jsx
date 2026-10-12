@@ -148,6 +148,9 @@ export default function App() {
   // Mes groupes de chauffeurs ([{ id, name, members }]) et nom du groupe en cours de création.
   const [myGroups, setMyGroups] = useState([]);
   const [groupNameDraft, setGroupNameDraft] = useState(null);
+  // Écran « Mes groupes » : groupe en cours de création / modification ({ id|null, name, members }).
+  const [groupEdit, setGroupEdit] = useState(null);
+  const [groupSearch, setGroupSearch] = useState("");
   const [myRides, setMyRides] = useState([]); // historique complet du chauffeur (listenMyRides)
   const [positions, setPositions] = useState({});
   const [profiles, setProfiles] = useState({});
@@ -1479,8 +1482,20 @@ export default function App() {
   };
   const createGroup = (name, members) =>
     saveGroups([...myGroups, { id: uid(), name: name.trim(), members }]);
-  const replaceGroupMembers = (id, members) =>
-    saveGroups(myGroups.map((g) => (g.id === id ? { ...g, members } : g)));
+  const saveGroupEdit = async () => {
+    const { id, name, members } = groupEdit;
+    await saveGroups(id
+      ? myGroups.map((g) => (g.id === id ? { ...g, name: name.trim(), members } : g))
+      : [...myGroups, { id: uid(), name: name.trim(), members }]);
+    setGroupEdit(null);
+  };
+  // Ouvre l'écran « Mes groupes » du compte (depuis la fenêtre « Envoyer à » par exemple).
+  const openGroupsManager = () => {
+    setDriverPicker(null);
+    setGroupEdit(null);
+    setAccountSubPanel("groups");
+    setShowAccountPanel(true);
+  };
   const deleteGroup = (id) => saveGroups(myGroups.filter((g) => g.id !== id));
   // Un groupe est « actif » quand tous ses membres sont dans la sélection ; le toucher les
   // ajoute tous, ou les retire tous s'il était déjà actif.
@@ -1496,6 +1511,63 @@ export default function App() {
     padding: "7px 12px", borderRadius: 999, border: `1.5px solid ${active ? "#FFB43A" : "var(--border-outline)"}`,
     background: active ? "#FFB43A" : "transparent", color: active ? "#1A1206" : "var(--text-tertiary)",
   });
+
+  // Recherche (insensible aux majuscules et accents) + liste à cocher des chauffeurs, partagées
+  // par la fenêtre « Envoyer à » et l'écran « Mes groupes ».
+  const foldName = (v) => String(v).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const renderDriverSearch = (search, setSearch) => (
+    <input
+      style={{ ...styles.input, width: "100%", marginBottom: 10 }}
+      placeholder={`Rechercher parmi ${assignableDrivers.length} chauffeurs…`}
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+    />
+  );
+  const renderDriverList = (sel, setSel, search, scrollStyle = {}) => {
+    const q = foldName(search.trim());
+    const shown = q ? assignableDrivers.filter((n) => foldName(n).includes(q)) : assignableDrivers;
+    const toggle = (n) => setSel(sel.includes(n) ? sel.filter((x) => x !== n) : [...sel, n]);
+    return (
+      <>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "var(--text-muted)", marginBottom: 6 }}>
+      <span>{q ? `${shown.length} résultat${shown.length > 1 ? "s" : ""}` : "Les chauffeurs en service d'abord"}</span>
+      {sel.length > 0 && (
+        <button type="button" onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--accent-text)", fontWeight: 700, cursor: "pointer", fontSize: 12.5 }}>
+          Tout décocher
+        </button>
+      )}
+    </div>
+    <div style={{ overflowY: "auto", margin: "0 -6px", ...scrollStyle }}>
+      {shown.map((n) => {
+        const checked = sel.includes(n);
+        const onDuty = isDriverOnDuty(n);
+        return (
+          <label key={n} style={{
+            display: "flex", alignItems: "center", gap: 12, padding: "12px 10px", borderRadius: 10, cursor: "pointer",
+            background: checked ? "rgba(255,180,58,0.10)" : "transparent",
+          }}>
+            <input type="checkbox" checked={checked} onChange={() => toggle(n)}
+              style={{ width: 20, height: 20, accentColor: "#FFB43A", flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 15, fontWeight: checked ? 700 : 500, color: "var(--text-primary)" }}>
+              {n}
+            </span>
+            {onDuty && (
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--positive-text)", flexShrink: 0 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3BD07A" }} /> en service
+              </span>
+            )}
+          </label>
+        );
+      })}
+      {shown.length === 0 && (
+        <p style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13.5, padding: "20px 0" }}>
+          {assignableDrivers.length === 0 ? "Aucun autre chauffeur inscrit." : "Aucun chauffeur ne correspond."}
+        </p>
+      )}
+    </div>
+      </>
+    );
+  };
 
   // Champ « Envoyer à » : résumé du choix + petites étiquettes retirables. Le choix lui-même
   // se fait dans une fenêtre avec recherche et liste à cocher (driverPicker), lisible même
@@ -2457,16 +2529,11 @@ export default function App() {
         .rp-fab-floating:active { transform: translateX(-50%) scale(0.92) !important; }
       `}</style>
 
-      {/* Alerte course prioritaire — s'affiche par-dessus n'importe quel écran
-          de l'appli (accueil, carte, messages, compte...) sans faire sortir le
-          chauffeur de ce qu'il était en train de faire. */}
+      {/* Fenêtre « Envoyer à » : recherche + liste à cocher, raccourcis de groupes. */}
       {driverPicker && (() => {
         const { sel, allLabel } = driverPicker;
-        const fold = (s) => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-        const q = fold(driverSearch.trim());
-        const shown = q ? assignableDrivers.filter((n) => fold(n).includes(q)) : assignableDrivers;
+        const q = foldName(driverSearch.trim());
         const setSel = (next) => setDriverPicker({ ...driverPicker, sel: next });
-        const toggle = (n) => setSel(sel.includes(n) ? sel.filter((x) => x !== n) : [...sel, n]);
         const close = () => setDriverPicker(null);
         const done = () => { driverPicker.onDone(sel); close(); };
         const canValidate = sel.length > 0 || !!allLabel;
@@ -2482,40 +2549,25 @@ export default function App() {
                 </h2>
                 <button type="button" onClick={close} style={styles.iconBtn}><X size={16} /></button>
               </div>
-              <input
-                style={{ ...styles.input, width: "100%", marginBottom: 10 }}
-                placeholder={`Rechercher parmi ${assignableDrivers.length} chauffeurs…`}
-                value={driverSearch}
-                onChange={(e) => setDriverSearch(e.target.value)}
-              />
+              {renderDriverSearch(driverSearch, setDriverSearch)}
               {!q && myGroups.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: "var(--text-muted)", marginBottom: 6 }}>MES GROUPES</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: "var(--text-muted)" }}>MES GROUPES</span>
+                    <button type="button" onClick={openGroupsManager}
+                      style={{ background: "none", border: "none", color: "var(--accent-text)", fontWeight: 700, cursor: "pointer", fontSize: 12.5 }}>
+                      Gérer mes groupes ›
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {myGroups.map((g) => {
                       const members = groupMembers(g);
                       const active = groupActive(g, sel);
                       return (
-                        <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <button type="button" disabled={!members.length} onClick={() => setSel(toggleGroup(g, sel))}
-                            style={{ ...groupChip(active), flex: 1, minWidth: 0, justifyContent: "flex-start", opacity: members.length ? 1 : 0.5 }}>
-                            {active ? <Check size={13} /> : <Users size={13} />}
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
-                            <span style={{ fontWeight: 500, opacity: 0.8 }}>({members.length})</span>
-                          </button>
-                          {sel.length > 0 && !active && (
-                            <button type="button" title="Remplacer les membres par la sélection actuelle"
-                              onClick={() => { if (window.confirm(`Remplacer les membres de « ${g.name} » par les ${sel.length} chauffeurs cochés ?`)) replaceGroupMembers(g.id, sel); }}
-                              style={styles.iconBtn}>
-                              <Pencil size={13} />
-                            </button>
-                          )}
-                          <button type="button" title="Supprimer le groupe"
-                            onClick={() => { if (window.confirm(`Supprimer le groupe « ${g.name} » ?`)) deleteGroup(g.id); }}
-                            style={styles.iconBtn}>
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                        <button type="button" key={g.id} disabled={!members.length} onClick={() => setSel(toggleGroup(g, sel))}
+                          style={{ ...groupChip(active), opacity: members.length ? 1 : 0.5 }}>
+                          {active ? <Check size={13} /> : <Users size={13} />} {g.name} ({members.length})
+                        </button>
                       );
                     })}
                   </div>
@@ -2545,42 +2597,7 @@ export default function App() {
                   <button type="button" onClick={() => setGroupNameDraft(null)} style={styles.iconBtn}><X size={14} /></button>
                 </form>
               ))}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5, color: "var(--text-muted)", marginBottom: 6 }}>
-                <span>{q ? `${shown.length} résultat${shown.length > 1 ? "s" : ""}` : "Les chauffeurs en service d'abord"}</span>
-                {sel.length > 0 && (
-                  <button type="button" onClick={() => setSel([])} style={{ background: "none", border: "none", color: "var(--accent-text)", fontWeight: 700, cursor: "pointer", fontSize: 12.5 }}>
-                    Tout décocher
-                  </button>
-                )}
-              </div>
-              <div style={{ flex: 1, overflowY: "auto", margin: "0 -6px", minHeight: 120 }}>
-                {shown.map((n) => {
-                  const checked = sel.includes(n);
-                  const onDuty = isDriverOnDuty(n);
-                  return (
-                    <label key={n} style={{
-                      display: "flex", alignItems: "center", gap: 12, padding: "12px 10px", borderRadius: 10, cursor: "pointer",
-                      background: checked ? "rgba(255,180,58,0.10)" : "transparent",
-                    }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggle(n)}
-                        style={{ width: 20, height: 20, accentColor: "#FFB43A", flexShrink: 0 }} />
-                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 15, fontWeight: checked ? 700 : 500, color: "var(--text-primary)" }}>
-                        {n}
-                      </span>
-                      {onDuty && (
-                        <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--positive-text)", flexShrink: 0 }}>
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3BD07A" }} /> en service
-                        </span>
-                      )}
-                    </label>
-                  );
-                })}
-                {shown.length === 0 && (
-                  <p style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13.5, padding: "20px 0" }}>
-                    {assignableDrivers.length === 0 ? "Aucun autre chauffeur inscrit." : "Aucun chauffeur ne correspond."}
-                  </p>
-                )}
-              </div>
+              {renderDriverList(sel, setSel, driverSearch, { flex: 1, minHeight: 120 })}
               <div style={{ display: "flex", gap: 8, paddingTop: 12, borderTop: "1px solid var(--border-outline)", marginTop: 8 }}>
                 <button type="button" onClick={close} style={{ ...styles.btnGhost, minHeight: 50 }}>Annuler</button>
                 <button
@@ -2598,6 +2615,9 @@ export default function App() {
         );
       })()}
 
+      {/* Alerte course prioritaire — s'affiche par-dessus n'importe quel écran
+          de l'appli (accueil, carte, messages, compte...) sans faire sortir le
+          chauffeur de ce qu'il était en train de faire. */}
       {priorityAlert && (() => {
         const r = priorityAlert.ride;
         const meta = typeMeta(r.type);
@@ -4149,7 +4169,7 @@ export default function App() {
         <div style={styles.wizardOverlay}>
           <div style={styles.fullPageHeader}>
             {accountSubPanel ? (
-              <button onClick={() => setAccountSubPanel(null)} style={styles.wizardNavBtn} aria-label="Retour">
+              <button onClick={() => (groupEdit ? setGroupEdit(null) : setAccountSubPanel(null))} style={styles.wizardNavBtn} aria-label="Retour">
                 <ChevronLeft size={20} />
               </button>
             ) : (
@@ -4161,9 +4181,10 @@ export default function App() {
                 : accountSubPanel === "company" ? "Ma société"
                 : accountSubPanel === "dashboard" ? "Tableau de bord"
                 : accountSubPanel === "support" ? "Aide & réclamations"
+                : accountSubPanel === "groups" ? (groupEdit ? (groupEdit.id ? "Modifier le groupe" : "Nouveau groupe") : "Mes groupes")
                 : driverName}
             </h2>
-            <button onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); }} style={styles.wizardNavBtn} aria-label="Fermer">
+            <button onClick={() => { setShowAccountPanel(false); setAccountSubPanel(null); setGroupEdit(null); }} style={styles.wizardNavBtn} aria-label="Fermer">
               <X size={20} />
             </button>
           </div>
@@ -4190,6 +4211,10 @@ export default function App() {
                   <button onClick={() => setAccountSubPanel("settings")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><Settings size={16} /> Réglages (service, notifications)</span>
                     <span style={{ color: "var(--text-faint)" }}>›</span>
+                  </button>
+                  <button onClick={() => { setGroupEdit(null); setAccountSubPanel("groups"); }} style={styles.categoryBtn}>
+                    <span style={styles.categoryBtnLeft}><Users size={16} /> Mes groupes de chauffeurs</span>
+                    <span style={{ color: "var(--text-faint)" }}>{myGroups.length || ""} ›</span>
                   </button>
                   <button onClick={() => setAccountSubPanel("company")} style={styles.categoryBtn}>
                     <span style={styles.categoryBtnLeft}><Building2 size={16} /> Ma société</span>
@@ -4221,6 +4246,71 @@ export default function App() {
                 </div>
               </>
             )}
+
+            {accountSubPanel === "groups" && !groupEdit && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <p style={{ color: "var(--text-muted)", fontSize: 13.5, margin: "0 0 4px" }}>
+                  Les chauffeurs avec qui tu travailles le plus. Au moment d'envoyer une course, un appui sur le groupe le
+                  sélectionne en entier. Tes groupes sont privés : personne d'autre ne les voit.
+                </p>
+                {myGroups.map((g) => {
+                  const members = groupMembers(g);
+                  return (
+                    <div key={g.id} style={{ ...styles.categoryBtn, cursor: "default", flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Users size={16} color="#FFB43A" style={{ flexShrink: 0 }} />
+                        <strong style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</strong>
+                        <button type="button" onClick={() => { setGroupSearch(""); setGroupEdit({ id: g.id, name: g.name, members }); }} style={styles.iconBtn}>
+                          <Pencil size={13} style={{ marginRight: 4 }} /> Modifier
+                        </button>
+                        <button type="button" aria-label={`Supprimer ${g.name}`}
+                          onClick={() => { if (window.confirm(`Supprimer le groupe « ${g.name} » ?`)) deleteGroup(g.id); }}
+                          style={{ ...styles.iconBtn, color: "#E5484D" }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      <span style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 400, textAlign: "left" }}>
+                        {members.length ? `${members.length} chauffeur${members.length > 1 ? "s" : ""} : ${members.join(", ")}` : "Aucun chauffeur"}
+                      </span>
+                    </div>
+                  );
+                })}
+                {myGroups.length === 0 && (
+                  <p style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 13.5, padding: "12px 0" }}>Tu n'as pas encore de groupe.</p>
+                )}
+                <button type="button" onClick={() => { setGroupSearch(""); setGroupEdit({ id: null, name: "", members: [] }); }}
+                  style={{ ...styles.btnPrimary, justifyContent: "center", minHeight: 50, marginTop: 4 }}>
+                  <Plus size={16} /> Nouveau groupe
+                </button>
+              </div>
+            )}
+
+            {accountSubPanel === "groups" && groupEdit && (() => {
+              const canSave = groupEdit.name.trim() && groupEdit.members.length > 0;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <label style={styles.fieldLabel}>
+                    Nom du groupe
+                    <input autoFocus={!groupEdit.id} maxLength={40} style={styles.input} placeholder="Ex : Équipe Strasbourg"
+                      value={groupEdit.name} onChange={(e) => setGroupEdit({ ...groupEdit, name: e.target.value })} />
+                  </label>
+                  <div style={styles.fieldLabel}>
+                    Chauffeurs du groupe{groupEdit.members.length > 0 && <span style={{ color: "var(--accent-text)" }}> · {groupEdit.members.length}</span>}
+                  </div>
+                  <div>
+                    {renderDriverSearch(groupSearch, setGroupSearch)}
+                    {renderDriverList(groupEdit.members, (members) => setGroupEdit({ ...groupEdit, members }), groupSearch)}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, position: "sticky", bottom: 0, paddingTop: 10, paddingBottom: 6, background: "var(--bg-screen)" }}>
+                    <button type="button" onClick={() => setGroupEdit(null)} style={{ ...styles.btnGhost, minHeight: 50 }}>Annuler</button>
+                    <button type="button" disabled={!canSave} onClick={saveGroupEdit}
+                      style={{ ...styles.btnPrimary, flex: 1, minHeight: 50, justifyContent: "center", opacity: canSave ? 1 : 0.5 }}>
+                      {groupEdit.id ? "Enregistrer" : "Créer le groupe"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {accountSubPanel === "profile" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
