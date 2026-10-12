@@ -47,6 +47,7 @@ service cloud.firestore {
     // requête (serverTimestamp), impossible à antidater.
     function isClaim() {
       return resource.data.status == 'disponible'
+        && resource.data.get('assignedTo', null) == null
         && request.resource.data.status == 'en_attente'
         && request.resource.data.pendingBy == request.auth.token.name
         && request.resource.data.pendingAt == request.time
@@ -82,8 +83,28 @@ service cloud.firestore {
           && changedOnly(['status']))
         || (resource.data.status == 'prise' && request.resource.data.status == 'disponible'
           && request.resource.data.get('takenBy', null) == null
-          && changedOnly(['status', 'takenBy']))
+          && changedOnly(['status', 'takenBy', 'assignStatus', 'assignRespondedAt'])
+          && request.resource.data.get('assignStatus', null) in [resource.data.get('assignStatus', null), 'refusee'])
       );
+    }
+
+    // Course envoyée par le posteur à UN chauffeur (assignedTo) : personne d'autre ne peut
+    // la demander (isClaim) ; le chauffeur choisi l'accepte directement ou la refuse.
+    function isAssignee() {
+      return resource.data.get('assignedTo', null) == request.auth.token.name
+        && resource.data.status == 'disponible'
+        && resource.data.get('assignStatus', null) != 'refusee';
+    }
+    function isAssigneeAccept() {
+      return isAssignee()
+        && request.resource.data.status == 'prise'
+        && request.resource.data.takenBy == request.auth.token.name
+        && changedOnly(['status', 'takenBy']);
+    }
+    function isAssigneeRefuse() {
+      return isAssignee()
+        && request.resource.data.assignStatus == 'refusee'
+        && changedOnly(['assignStatus', 'assignRespondedAt']);
     }
 
     // Corbeille : une course n'est jamais effacée par un chauffeur, seulement marquée
@@ -158,6 +179,8 @@ service cloud.firestore {
             || isRequesterCancel()
             || isRequesterAutoConfirm()
             || isTakerAction()
+            || isAssigneeAccept()
+            || isAssigneeRefuse()
           ))
         )
       );

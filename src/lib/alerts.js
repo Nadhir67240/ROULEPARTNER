@@ -175,3 +175,34 @@ export function notifyNewMessage(senderName, text) {
     // ignore
   }
 }
+
+// Course envoyée directement à ce chauffeur par un collègue.
+export function notifyAssignedRide(ride) {
+  playAlertSound(ride.urgent);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification("📨 Course pour toi", {
+      body: `${ride.postedBy} t'envoie : ${ride.depart} → ${ride.arrivee}${ride.heure ? ` — ${ride.heure}` : ""}`,
+      icon: "/icon-192.png",
+      tag: `${ride.id}-assigned`,
+      requireInteraction: true,
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Le chauffeur choisi a refusé la course (ou l'a relâchée) : elle revient au posteur.
+export function notifyAssignRefused(ride) {
+  playAlertSound(false);
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification("❌ Course refusée", {
+      body: `${ride.assignedTo} ne prend pas ${ride.depart} → ${ride.arrivee} — à toi de choisir la suite.`,
+      icon: "/icon-192.png",
+      tag: `${ride.id}-refused`,
+    });
+  } catch (e) {
+    // ignore
+  }
+}

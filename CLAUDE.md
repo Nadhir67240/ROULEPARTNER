@@ -74,6 +74,14 @@ ever changes, update all three.
 **Ride lifecycle** (`status` field): `disponible` → `en_attente` (claim pending confirmation,
 via `claimRide`'s Firestore transaction to avoid double-claims) → `prise` → `en_cours` → `terminee`.
 
+**Rides sent to one driver** (`assignedTo` + `assignStatus`: `envoyee` | `refusee`): hidden
+client-side from everyone but the poster and the assignee (Firestore reads stay open to all
+verified drivers), no priority window (`notifyNewRide` writes `priorityDrivers: []` and notifies
+only the assignee), `isClaim` refuses them. The assignee accepts (straight to `prise`) or refuses;
+a refusal or release sends it back to the poster, who can resend it or publish it to everyone
+(`assignedTo: null`). Push notifications for these transitions: `handleAssignmentChange()` in
+`functions/index.js`.
+
 **Ride deletion is soft** (`deleted`/`deletedBy`/`deletedAt`, via `archiveRide`): archived rides
 are hidden everywhere and shown to the admin only, in the "Corbeille" view (restore or hard
 delete). A driver may archive only their own ride while it is still `disponible` and unclaimed;

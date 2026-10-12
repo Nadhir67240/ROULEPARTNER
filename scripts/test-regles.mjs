@@ -218,6 +218,42 @@ await expect("admin met à la corbeille une course terminée", true, () =>
   updateDoc(doc(admin.db, "rides/d5"), archive(admin)));
 await expect("admin efface définitivement une course", true, () => deleteDoc(doc(admin.db, "rides/d5")));
 
+// --- Course envoyée à un chauffeur choisi (assignedTo) ---
+const assigned = (over) => baseRide({ assignedTo: "Demandeur", assignStatus: "envoyee", ...over });
+await expect("posteur publie une course envoyée à un chauffeur", true, () =>
+  setDoc(doc(poster.db, "rides/a0"), newRide({ assignedTo: "Demandeur", assignStatus: "envoyee" })));
+await adminSet("a1", assigned({}));
+await expect("un autre chauffeur demande une course envoyée à quelqu'un d'autre", false, () =>
+  updateDoc(doc(other.db, "rides/a1"), { status: "en_attente", pendingBy: "Autre", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
+await expect("un autre chauffeur l'accepte à sa place", false, () =>
+  updateDoc(doc(other.db, "rides/a1"), { status: "prise", takenBy: "Autre" }));
+await expect("le chauffeur choisi l'accepte en changeant le tarif", false, () =>
+  updateDoc(doc(req.db, "rides/a1"), { status: "prise", takenBy: "Demandeur", tarif: "999" }));
+await expect("le chauffeur choisi l'accepte", true, () =>
+  updateDoc(doc(req.db, "rides/a1"), { status: "prise", takenBy: "Demandeur" }));
+await expect("…puis la relâche (elle revient au posteur, refusée)", true, () =>
+  updateDoc(doc(req.db, "rides/a1"), { status: "disponible", takenBy: null, assignStatus: "refusee", assignRespondedAt: Date.now() }));
+await adminSet("a2", assigned({}));
+await expect("un autre chauffeur la refuse à sa place", false, () =>
+  updateDoc(doc(other.db, "rides/a2"), { assignStatus: "refusee", assignRespondedAt: Date.now() }));
+await expect("le chauffeur choisi la refuse", true, () =>
+  updateDoc(doc(req.db, "rides/a2"), { assignStatus: "refusee", assignRespondedAt: Date.now() }));
+await expect("…puis l'accepte quand même après l'avoir refusée", false, () =>
+  updateDoc(doc(req.db, "rides/a2"), { status: "prise", takenBy: "Demandeur" }));
+await expect("…ou se la renvoie à lui-même", false, () =>
+  updateDoc(doc(req.db, "rides/a2"), { assignStatus: "envoyee" }));
+await expect("posteur l'envoie à un autre chauffeur", true, () =>
+  updateDoc(doc(poster.db, "rides/a2"), { assignedTo: "Autre", assignStatus: "envoyee", assignRespondedAt: null }));
+await expect("l'ancien destinataire l'accepte encore", false, () =>
+  updateDoc(doc(req.db, "rides/a2"), { status: "prise", takenBy: "Demandeur" }));
+await expect("posteur la publie à tous", true, () =>
+  updateDoc(doc(poster.db, "rides/a2"), { assignedTo: null, assignStatus: null, assignRespondedAt: null }));
+await expect("…et n'importe qui peut alors la demander", true, () =>
+  updateDoc(doc(req.db, "rides/a2"), { status: "en_attente", pendingBy: "Demandeur", pendingSince: Date.now(), pendingAt: serverTimestamp() }));
+await adminSet("a3", assigned({}));
+await expect("posteur met à la corbeille une course envoyée sans réponse", true, () =>
+  updateDoc(doc(poster.db, "rides/a3"), { deleted: true, deletedBy: "Poster", deletedAt: Date.now() }));
+
 // --- Fiche profil à l'inscription (email pas encore confirmé) ---
 const nouveau = await makeUser("Nouveau", { verified: false });
 const fiche = (over) => ({ email: nouveau.email, licenseNumber: "LIC1", commune: "Strasbourg", banned: false, createdAt: Date.now(), ...over });

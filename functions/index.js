@@ -185,6 +185,69 @@ async function sendTo(entries, payload) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const rideData = (rideId, ride) => ({
+  rideId,
+  depart: String(ride.depart || ""),
+  arrivee: String(ride.arrivee || ""),
+  heure: String(ride.heure || ""),
+});
+
+async function notifyAssignee(rideId, ride) {
+  const entries = await tokensFor([ride.assignedTo]);
+  await sendTo(entries, {
+    notification: {
+      title: ride.urgent ? "🚨 Course urgente pour toi" : "📨 Course pour toi",
+      body: `${ride.postedBy} t'envoie : ${ride.depart} → ${ride.arrivee}${ride.heure ? ` — ${ride.heure}` : ""}`,
+    },
+    data: { ...rideData(rideId, ride), priority: "true", shared: "false" },
+    requireInteraction: true,
+  });
+}
+
+// Course envoyée à un chauffeur précis : réponses et changements de destinataire.
+// Renvoie true si l'événement a été traité ici.
+async function handleAssignmentChange(rideId, before, after) {
+  if (after.deleted) return false;
+
+  // Le chauffeur choisi accepte : on prévient le posteur.
+  if (before.status === "disponible" && after.status === "prise" && after.assignedTo && after.takenBy === after.assignedTo) {
+    await sendTo(await tokensFor([after.postedBy]), {
+      notification: { title: "✅ Course acceptée", body: `${after.takenBy} prend ${after.depart} → ${after.arrivee}` },
+      data: rideData(rideId, after),
+    });
+    return true;
+  }
+  if (after.status !== "disponible") return false;
+
+  // Il refuse (le relâchement d'une course prise est déjà notifié par ailleurs).
+  if (before.status === "disponible" && after.assignedTo && after.assignStatus === "refusee" && before.assignStatus !== "refusee") {
+    await sendTo(await tokensFor([after.postedBy]), {
+      notification: { title: "❌ Course refusée", body: `${after.assignedTo} ne prend pas ${after.depart} → ${after.arrivee} — à toi de choisir la suite.` },
+      data: rideData(rideId, after),
+    });
+    return true;
+  }
+  // Le posteur l'envoie à un autre chauffeur (ou au même, après un refus).
+  if (after.assignedTo && after.assignStatus === "envoyee"
+    && (after.assignedTo !== before.assignedTo || before.assignStatus === "refusee")) {
+    await notifyAssignee(rideId, after);
+    return true;
+  }
+  // Le posteur la publie à tous : annoncée comme une nouvelle course, sans priorité.
+  if (before.assignedTo && !after.assignedTo) {
+    const others = await allTokensExcept([after.postedBy]);
+    await sendTo(others, {
+      notification: {
+        title: after.urgent ? "🚨 Course urgente disponible" : "Nouvelle course disponible",
+        body: `${after.depart} → ${after.arrivee} — ${after.heure || ""}`.trim(),
+      },
+      data: { ...rideData(rideId, after), priority: "false", shared: "false" },
+    });
+    return true;
+  }
+  return false;
+}
+
 exports.notifyNewRide = onDocumentCreated(
   // La fonction attend toute la fenêtre de priorité (30 s) avant de prévenir les autres : marge large.
   { document: "rides/{rideId}", timeoutSeconds: 120 },
@@ -193,6 +256,15 @@ exports.notifyNewRide = onDocumentCreated(
     if (!snap) return;
     const ride = snap.data();
     if (!ride || ride.status !== "disponible") return;
+
+    // Course envoyée par le posteur à un seul chauffeur : pas de priorité géographique,
+    // on ne prévient que lui. priorityDrivers vide = ouverte à tous tout de suite si le
+    // posteur la publie plus tard (les règles exigent que le champ existe).
+    if (ride.assignedTo) {
+      await snap.ref.update({ priorityDrivers: [], priorityUntil: 0 });
+      await notifyAssignee(event.params.rideId, ride);
+      return;
+    }
 
     const positions = await loadPositions();
     const priority = computePriorityDrivers(ride, positions);
@@ -268,7 +340,9 @@ exports.notifyRideStatusChange = onDocumentUpdated(
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
-    if (!after || !before || before.status === after.status) return;
+    if (!after || !before) return;
+    if (await handleAssignmentChange(event.params.rideId, before, after)) return;
+    if (before.status === after.status) return;
 
     // "disponible" ne doit déclencher une notif que dans le cas précis d'un relâchement
     // (prise -> disponible) : un refus de demande (en_attente -> disponible) est déjà
