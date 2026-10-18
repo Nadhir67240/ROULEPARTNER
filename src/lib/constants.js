@@ -33,6 +33,14 @@ export const PRIORITY_RADIUS_KM = 1.0;
 // Une position n'est prise en compte que si elle est récente — même règle que côté serveur.
 export const POSITION_FRESH_MS = 15 * 60 * 1000;
 
+// Rythme d'envoi de la position GPS. Chaque écriture dans "positions" est relue par tous
+// les téléphones connectés (coût Firestore = écritures × chauffeurs en ligne) : on envoie
+// au plus une position toutes les 30 s, et seulement si le chauffeur a bougé de 100 m,
+// sinon une par minute pour rester "frais". Largement assez pour la priorité (1 km).
+export const POSITION_WRITE_MIN_MS = 30 * 1000;
+export const POSITION_WRITE_MAX_MS = 60 * 1000;
+export const POSITION_WRITE_MIN_KM = 0.1;
+
 // Nombre maximum de chauffeurs prioritaires simultanés.
 export const PRIORITY_MAX_DRIVERS = 3;
 

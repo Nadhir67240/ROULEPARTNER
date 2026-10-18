@@ -19,7 +19,7 @@ import {
   watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
-import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
+import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, POSITION_WRITE_MIN_MS, POSITION_WRITE_MAX_MS, POSITION_WRITE_MIN_KM, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
 import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, computeTaxiPayantTarif, isTaxiPayantNuit, TAXI_PAYANT_KM_RATES, TAXI_PAYANT_PEC, TAXI_PAYANT_HEURE_ATTENTE, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
 import { formatPostedAt, dateKey, todayKey, timePlusMinutes, formatRideDate, FRENCH_MONTHS, formatDayMonth, FRENCH_WEEKDAYS_SHORT, keyFromDate, dateFromKey, addDaysKey, startOfWeekKey, rideTimingBadge, thisWeekRange } from "./lib/dates";
 import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyRideModified, notifyNewMessage, notifyAssignedRide, notifyAssignRefused } from "./lib/alerts";
@@ -1047,6 +1047,8 @@ export default function App() {
   }, [releaseAlert]);
 
   const watchIdRef = useRef(null);
+  // Dernière position réellement envoyée à Firestore ({ lat, lng, at }), pour espacer les envois.
+  const lastPosWriteRef = useRef(null);
 
   // [0] : refus des règles Firestore (compte pas encore reconnu, ou banni) ; [1] : autre échec.
   const POSITION_SHARE_ERRORS = [
@@ -1069,6 +1071,7 @@ export default function App() {
       return;
     }
     setMyPosStatus("locating");
+    lastPosWriteRef.current = null; // la première position part tout de suite
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (pos) => {
         const coords = {
@@ -1078,8 +1081,17 @@ export default function App() {
         };
         setMyPosStatus("ok");
         localStorage.setItem("rp-sharing-enabled", "1");
+        // Le GPS remonte une position toutes les 1 à 5 s : on n'en envoie qu'une partie.
+        const last = lastPosWriteRef.current;
+        if (last) {
+          const elapsed = coords.updatedAt - last.at;
+          const movedKm = distanceKm(last, coords) || 0;
+          if (elapsed < POSITION_WRITE_MIN_MS) return;
+          if (elapsed < POSITION_WRITE_MAX_MS && movedKm < POSITION_WRITE_MIN_KM) return;
+        }
         try {
           await setDriverPosition(driverName, coords);
+          lastPosWriteRef.current = { lat: coords.lat, lng: coords.lng, at: coords.updatedAt };
           // Le partage refonctionne : on retire l'éventuel message d'échec affiché plus tôt.
           setError((prev) => (POSITION_SHARE_ERRORS.includes(prev) ? "" : prev));
         } catch (e) {
