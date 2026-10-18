@@ -6,7 +6,7 @@ import {
   Stethoscope, X, Navigation, Timer, LogOut, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
   Phone, List, Map as MapIcon, History, CalendarDays,
   FileText, Camera, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
-  Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell,
+  Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell, Eye, EyeOff,
 } from "lucide-react";
 import {
   listenRides, listenMyRides, addRide, updateRide, deleteRide, archiveRide, restoreRide, claimRide, getRideAttachment, getRidePatient, migrateRidePatient, rideLeaksPatient,
@@ -93,6 +93,36 @@ function chatListTime(ts) {
   if (d.toDateString() === new Date().toDateString()) return chatTime(ts);
   const label = chatDayLabel(ts);
   return label === "Hier" ? "Hier" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+}
+
+// Champ mot de passe avec un œil pour l'afficher ou le masquer. Les navigateurs de téléphone
+// n'en proposent pas (seul Edge sur PC en ajoute un, masqué dans index.css pour éviter le doublon).
+function PasswordInput({ style, ...props }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div style={{ position: "relative", width: style?.width }}>
+      <input
+        {...props}
+        type={visible ? "text" : "password"}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        style={{ ...style, width: "100%", boxSizing: "border-box", paddingRight: 46 }}
+      />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        aria-label={visible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+        style={{
+          position: "absolute", top: 0, right: 0, bottom: style?.marginBottom || 0, width: 44,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)",
+        }}
+      >
+        {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+      </button>
+    </div>
+  );
 }
 
 // Onglet de la barre du bas (mobile) : icône dans une pastille, colorée quand l'onglet est actif.
@@ -2259,8 +2289,7 @@ export default function App() {
               required
               autoComplete="email"
             />
-            <input
-              type="password"
+            <PasswordInput
               value={authPassword}
               onChange={(e) => setAuthPassword(e.target.value)}
               placeholder="Mot de passe (6 caractères min.)"
@@ -5018,8 +5047,7 @@ export default function App() {
                     {" "}Les courses déjà faites restent dans l'historique de tes collègues.
                   </p>
                   <label style={styles.fieldLabel}>Pour confirmer, tape ton mot de passe</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     autoComplete="current-password"
                     value={deleteMyPassword}
                     onChange={(e) => setDeleteMyPassword(e.target.value)}
