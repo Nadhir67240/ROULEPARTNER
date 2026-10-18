@@ -10,7 +10,9 @@ admin.initializeApp();
 const db = admin.firestore();
 
 // Europe/Paris : garde les fonctions près des chauffeurs, ça réduit la latence.
-setGlobalOptions({ region: "europe-west1", maxInstances: 10 });
+// maxInstances 30 : notifyNewRide occupe une instance pendant les 30 s de priorité, il en
+// faut assez pour que plusieurs courses postées en même temps ne retardent pas les notifications.
+setGlobalOptions({ region: "europe-west1", maxInstances: 30 });
 
 // Doit correspondre exactement à l'email admin utilisé dans firestore.rules et App.jsx.
 const ADMIN_EMAIL = "taxi-vsl67@hotmail.com";
