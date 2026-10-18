@@ -1161,6 +1161,10 @@ export default function App() {
   // Enregistre la course du formulaire. Appelé par la dernière étape ET par la
   // publication express de l'étape 2 (patient, notes et pièces jointes facultatifs).
   const postingRef = useRef(false);
+  const PUBLISH_STUCK_ERROR =
+    "Ta course n'arrive pas jusqu'au serveur : la connexion est coupée ou bloquée. Si tu utilises un bloqueur de pub, " +
+    "un VPN ou un « DNS privé », autorise RoulePartner (ou coupe-le), puis rouvre l'appli. La course partira toute seule " +
+    "dès que la connexion passera : ne la republie pas, sinon elle sera en double.";
   const submitRide = async () => {
     if (!form.depart || !form.arrivee || !form.heure) return;
     if (postingRef.current) return; // double appui : une seule publication
@@ -1204,7 +1208,16 @@ export default function App() {
           // priorité, le premier des choisis qui accepte l'obtient.
           ...(sendToDrivers.length ? { assignees: sendToDrivers, assignRefused: [] } : {}),
         };
-        await addRide(newRide);
+        // Avec le cache local, addRide n'aboutit qu'une fois la course reçue par le serveur :
+        // si la connexion à Firestore est coupée ou bloquée (bloqueur de pub, DNS filtrant,
+        // VPN…), l'appui sur "Publier" semblait ne rien faire. Passé 10 s, on ferme quand même
+        // le formulaire (la course est en file d'attente et partira dès que la connexion
+        // passera — la republier ferait un doublon) et on explique pourquoi.
+        const sent = await Promise.race([
+          addRide(newRide).then(() => true),
+          new Promise((resolve) => setTimeout(() => resolve(false), 10000)),
+        ]);
+        if (!sent) setError(PUBLISH_STUCK_ERROR);
       }
       setSendToDrivers([]);
       setForm(emptyForm);
