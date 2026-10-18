@@ -37,6 +37,8 @@ import {
   updateProfile,
   onAuthStateChanged,
   verifyBeforeUpdateEmail,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
 } from "firebase/auth";
 import { getMessaging, getToken, isSupported, onMessage } from "firebase/messaging";
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -169,6 +171,22 @@ export async function logIn(email, password) {
 export async function logOut() {
   await unregisterFcmToken();
   await signOut(auth);
+}
+
+// Suppression du compte par le chauffeur lui-même (exigée par l'App Store et le Play Store).
+// Firebase n'accepte de supprimer un compte qu'après une connexion récente : on redemande
+// donc le mot de passe. Les données (fiche, position, jetons, groupes, licence) sont
+// effacées côté serveur par cleanupDeletedUser dès que le compte Auth disparaît.
+// beforeDelete : appelé une fois le mot de passe vérifié, juste avant la suppression
+// (l'appli y archive les courses encore libres du chauffeur).
+export async function deleteOwnAccount(password, beforeDelete) {
+  const user = auth.currentUser;
+  if (!user?.email) throw new Error("not_signed_in");
+  await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+  if (beforeDelete) await beforeDelete();
+  await unregisterFcmToken();
+  if (user.displayName) await deleteDoc(doc(positionsCol, user.displayName)).catch(() => {});
+  await user.delete();
 }
 
 export async function resendVerificationEmail() {

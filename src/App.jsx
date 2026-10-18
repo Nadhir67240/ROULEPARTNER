@@ -16,7 +16,7 @@ import {
   requestEmailChange, updateProfileFields, changeDriverLicense,
   setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth, ensureOwnProfile,
   isAssignedRide, rideAssignees, rideAssignRefused, rideAssigneesPending, refuseAssignedRide, releaseAssignedRide, sendRideToDrivers, listenMyGroups, saveMyGroups,
-  watchAuthState, signUp, logIn, logOut, resendVerificationEmail, reloadUser, requestPasswordReset,
+  watchAuthState, signUp, logIn, logOut, deleteOwnAccount, resendVerificationEmail, reloadUser, requestPasswordReset,
   listenForegroundMessages,
 } from "./firebase";
 import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, POSITION_WRITE_MIN_MS, POSITION_WRITE_MAX_MS, POSITION_WRITE_MIN_KM, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
@@ -324,6 +324,10 @@ export default function App() {
   const [banTarget, setBanTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteStatus, setDeleteStatus] = useState(null); // null | "loading" | { error }
+  // Suppression de son propre compte par le chauffeur (Compte → "Supprimer mon compte").
+  const [showDeleteMyAccount, setShowDeleteMyAccount] = useState(false);
+  const [deleteMyPassword, setDeleteMyPassword] = useState("");
+  const [deleteMyStatus, setDeleteMyStatus] = useState(null); // null | "loading" | { error }
   const [banReason, setBanReason] = useState("");
   const [bannedNotice, setBannedNotice] = useState(false);
   const isAdmin = user?.email === ADMIN_EMAIL;
@@ -4422,6 +4426,14 @@ export default function App() {
                   >
                     <span style={styles.categoryBtnLeft}><LogOut size={16} /> Se déconnecter</span>
                   </button>
+                  {!isAdmin && (
+                    <button
+                      onClick={() => { setDeleteMyPassword(""); setDeleteMyStatus(null); setShowDeleteMyAccount(true); }}
+                      style={{ ...styles.categoryBtn, border: "none", background: "transparent", color: "var(--text-faint)", fontSize: 13, justifyContent: "center" }}
+                    >
+                      <span style={styles.categoryBtnLeft}><Trash2 size={14} /> Supprimer mon compte</span>
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -4949,6 +4961,101 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showDeleteMyAccount && (() => {
+        // Courses qu'on ne peut pas laisser en plan : celles que le chauffeur a prises ou
+        // demandées, et les siennes déjà acceptées par un collègue. Il doit d'abord les
+        // terminer ou les relâcher. Ses courses encore libres sont archivées automatiquement.
+        const ACTIVE = ["en_attente", "prise", "en_cours"];
+        const seen = new Map();
+        [...myRides, ...rides].forEach((r) => { if (!r.deleted) seen.set(r.id, r); });
+        const mine = [...seen.values()];
+        const blocking = mine.filter((r) => ACTIVE.includes(r.status)
+          && (r.postedBy === driverName || r.takenBy === driverName || r.pendingBy === driverName));
+        const freeOwn = mine.filter((r) => r.postedBy === driverName && r.status === "disponible");
+        const close = () => { if (deleteMyStatus !== "loading") setShowDeleteMyAccount(false); };
+        return (
+          // Ouverte depuis l'écran Compte (wizardOverlay, zIndex 200) : elle doit passer par-dessus.
+          <div style={{ ...styles.modalOverlay, zIndex: 300 }} onClick={close}>
+            <div style={{ ...styles.modalCard, maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <h2 style={styles.modalTitle}>Supprimer mon compte</h2>
+                <button onClick={close} style={styles.iconBtn}>
+                  <X size={16} />
+                </button>
+              </div>
+              {blocking.length > 0 ? (
+                <>
+                  <p style={{ color: "var(--text-muted)", fontSize: 13.5, marginBottom: 12 }}>
+                    Tu as encore {blocking.length} course{blocking.length > 1 ? "s" : ""} en cours ou en attente
+                    (prise{blocking.length > 1 ? "s" : ""} par toi, ou acceptée{blocking.length > 1 ? "s" : ""} par un collègue).
+                    Termine-{blocking.length > 1 ? "les" : "la"} ou relâche-{blocking.length > 1 ? "les" : "la"} d'abord, puis reviens ici.
+                  </p>
+                  <div style={styles.modalActions}>
+                    <button onClick={close} style={styles.btnGhost}>Fermer</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{ color: "var(--text-muted)", fontSize: 13.5, marginBottom: 12 }}>
+                    Ton compte sera supprimé définitivement : tu ne pourras plus te connecter, et ta fiche, ta position,
+                    tes groupes et ton numéro de licence seront effacés.
+                    {freeOwn.length > 0 && ` Tes ${freeOwn.length > 1 ? `${freeOwn.length} courses encore libres seront retirées` : "course encore libre sera retirée"} du tableau.`}
+                    {" "}Les courses déjà faites restent dans l'historique de tes collègues.
+                  </p>
+                  <label style={styles.fieldLabel}>Pour confirmer, tape ton mot de passe</label>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={deleteMyPassword}
+                    onChange={(e) => setDeleteMyPassword(e.target.value)}
+                    style={{ ...styles.input, width: "100%", marginBottom: 12 }}
+                  />
+                  {deleteMyStatus?.error && (
+                    <p style={{ color: "#E5484D", fontSize: 12.5, marginBottom: 12 }}>{deleteMyStatus.error}</p>
+                  )}
+                  <div style={styles.modalActions}>
+                    <button onClick={close} style={styles.btnGhost} disabled={deleteMyStatus === "loading"}>
+                      Annuler
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setDeleteMyStatus("loading");
+                        try {
+                          await deleteOwnAccount(deleteMyPassword, async () => {
+                            if (watchIdRef.current != null) {
+                              navigator.geolocation.clearWatch(watchIdRef.current);
+                              watchIdRef.current = null;
+                            }
+                            localStorage.setItem("rp-sharing-enabled", "0");
+                            for (const r of freeOwn) await archiveRide(r.id, driverName).catch(() => {});
+                          });
+                          // Le compte n'existe plus : l'écouteur d'authentification ramène à l'écran de connexion.
+                          setShowDeleteMyAccount(false);
+                          setDeleteMyStatus(null);
+                        } catch (e) {
+                          const code = e?.code || "";
+                          setDeleteMyStatus({
+                            error: code === "auth/wrong-password" || code === "auth/invalid-credential" || code === "auth/missing-password"
+                              ? "Mot de passe incorrect."
+                              : code === "auth/too-many-requests"
+                                ? "Trop d'essais. Réessaie dans quelques minutes."
+                                : "La suppression a échoué. Vérifie ta connexion internet et réessaie.",
+                          });
+                        }
+                      }}
+                      disabled={deleteMyStatus === "loading" || !deleteMyPassword}
+                      style={{ ...styles.btnPrimary, background: "#E5484D" }}
+                    >
+                      {deleteMyStatus === "loading" ? "Suppression…" : "Supprimer définitivement"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {deleteTarget && (
         <div style={styles.modalOverlay} onClick={() => setDeleteTarget(null)}>
