@@ -2624,13 +2624,14 @@ export default function App() {
   return (
     <div style={styles.page}>
       <style>{`
-        .rp-bottom-nav { display: none; }
-        .rp-bottom-spacer { height: 0; }
-        .rp-fab-floating { display: none !important; }
-        @media (max-width: 720px) {
-          .rp-bottom-nav { display: flex; }
-          .rp-bottom-spacer { height: 80px; }
-          .rp-fab-floating { display: flex !important; }
+        /* Barre du bas et bouton + : seul accès à Courses, Messages, Compte et à la
+           publication, donc affichés sur toutes les tailles d'écran (tablette, PC compris).
+           Sur grand écran, les onglets restent regroupés au centre (le + reste au milieu). */
+        .rp-bottom-nav { display: flex; }
+        .rp-bottom-spacer { height: 80px; }
+        .rp-fab-floating { display: flex !important; }
+        @media (min-width: 721px) {
+          .rp-bottom-nav { padding-left: calc(50% - 280px) !important; padding-right: calc(50% - 280px) !important; }
         }
         .rp-nav-item { -webkit-tap-highlight-color: transparent; transition: transform 0.12s ease; }
         .rp-nav-item:active { transform: scale(0.92); }
