@@ -6,7 +6,7 @@ import {
   Stethoscope, X, Navigation, Timer, LogOut, ChevronUp, ChevronLeft, ChevronRight, MessageCircle, Home,
   Phone, List, Map as MapIcon, History, CalendarDays,
   FileText, Camera, Settings, Building2, Shield, Send, Euro, Copy, Pencil,
-  Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell, Eye, EyeOff,
+  Users, LayoutDashboard, LifeBuoy, Mail, Filter, Bell, Eye, EyeOff, Star,
 } from "lucide-react";
 import {
   listenRides, listenMyRides, addRide, updateRide, deleteRide, archiveRide, restoreRide, claimRide, getRideAttachment, getRidePatient, migrateRidePatient, rideLeaksPatient,
@@ -23,7 +23,8 @@ import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS
 import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, computeTaxiPayantTarif, isTaxiPayantNuit, TAXI_PAYANT_KM_RATES, TAXI_PAYANT_PEC, TAXI_PAYANT_HEURE_ATTENTE, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
 import { formatPostedAt, dateKey, todayKey, timePlusMinutes, formatRideDate, FRENCH_MONTHS, formatDayMonth, FRENCH_WEEKDAYS_SHORT, keyFromDate, dateFromKey, addDaysKey, startOfWeekKey, rideTimingBadge, thisWeekRange } from "./lib/dates";
 import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyRideModified, notifyNewMessage, notifyAssignedRide, notifyAssignRefused } from "./lib/alerts";
-import { loadRideDraft, saveRideDraft, clearRideDraft, loadRecentAddresses, saveRecentAddress } from "./lib/storage";
+import { loadRideDraft, saveRideDraft, clearRideDraft, loadRecentAddresses, saveRecentAddress, toggleAddressPinned, RECENT_ADDRESSES_SHOWN } from "./lib/storage";
+import { localAddressMatches, dropDuplicateResults } from "./lib/addressShortcuts";
 import { computePriorityDrivers, distanceKm, fetchRoadDistanceKm, ridePickupCoords, wazeUrl, googleMapsUrl, cardLocality, shortAddress, isMedicalPoi, fetchBanSuggestions, interleaveResults, rankAddressResults, suggestionDistanceLabel } from "./lib/geo";
 import { compressPhoto, openPdfDocument } from "./lib/files";
 import { AuthSplash, AuthBackdrop, AuthVehicleStrip } from "./components/AuthScreens";
@@ -661,21 +662,28 @@ export default function App() {
     }, 200);
   };
 
-  // Source de suggestions active pour un champ : les adresses récentes tant que la saisie
-  // est trop courte pour interroger le service, sinon les résultats de recherche en direct.
+  // Source de suggestions active pour un champ : champ vide → favoris et adresses habituelles ;
+  // dès la 1re lettre → raccourcis locaux instantanés (adresses déjà utilisées + hôpitaux/cliniques
+  // du catalogue), puis, à partir de 3 lettres, les résultats en ligne à la suite.
   const suggestionListFor = (field) => {
     const value = field === "depart" ? form.depart : form.arrivee;
-    if (value.trim().length < 3) return recentAddresses;
-    return field === "depart" ? departSuggestions : arriveeSuggestions;
+    if (!value.trim()) return recentAddresses.slice(0, RECENT_ADDRESSES_SHOWN);
+    const local = localAddressMatches(value, recentAddresses, positions[driverName] || null);
+    if (value.trim().length < 3) return local;
+    return [...local, ...dropDuplicateResults(field === "depart" ? departSuggestions : arriveeSuggestions, local)];
   };
 
+  const toggleSuggestionPinned = (item) => setRecentAddresses(toggleAddressPinned(item));
+
   const pickAddressSuggestion = (field, item) => {
-    const address = item.recent ? item.address : shortAddress(item);
-    const lat = item.recent ? item.lat : parseFloat(item.lat);
-    const lng = item.recent ? item.lng : parseFloat(item.lon);
+    // Adresse récente ou raccourci du catalogue : déjà prête à l'emploi, sinon résultat brut du service.
+    const ready = item.recent || item.local;
+    const address = ready ? item.address : shortAddress(item);
+    const lat = ready ? item.lat : parseFloat(item.lat);
+    const lng = ready ? item.lng : parseFloat(item.lon);
     // Commune/département déjà connus pour un choix récent, sinon extraits du résultat de
     // recherche — servent à détecter automatiquement le forfait "grande ville" (taxi conventionné).
-    const { city, dept } = item.recent ? { city: item.city || "", dept: item.dept || "" } : addressCityDept(item);
+    const { city, dept } = ready ? { city: item.city || "", dept: item.dept || "" } : addressCityDept(item);
     if (field === "depart") {
       setForm({ ...form, depart: address, departLat: lat, departLng: lng, departCity: city, departDept: dept });
       setDepartSuggestions([]);
@@ -706,6 +714,58 @@ export default function App() {
     } else if (e.key === "Escape") {
       setActiveField(null);
     }
+  };
+
+  // Liste de suggestions sous un champ d'adresse (départ/arrivée) : raccourcis locaux en tête
+  // (étoile pour épingler en favori), résultats en ligne ensuite. Les raccourcis restent affichés
+  // pendant la recherche en ligne — "Recherche…" n'apparaît qu'en bas de liste.
+  const renderAddressSuggestions = (field) => {
+    if (activeField !== field) return null;
+    const value = field === "depart" ? form.depart : form.arrivee;
+    const list = suggestionListFor(field);
+    const searching = searchingAddress && value.trim().length >= 3;
+    if (list.length === 0 && !searching) return null;
+    const here = positions[driverName];
+    const headerStyle = { ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 };
+    return (
+      <div style={styles.suggestionBox}>
+        {!value.trim() && <div style={headerStyle}>Favoris et adresses habituelles</div>}
+        {list.map((s, i) => {
+          const isLocal = !!(s.recent || s.local);
+          const label = isLocal ? s.address : shortAddress(s);
+          const dist = s.recent ? null : suggestionDistanceLabel(here, s.local ? { lat: s.lat, lon: s.lng } : s);
+          const pinned = s.recent && s.pinned;
+          const Icon = pinned ? Star : s.recent ? Clock : s.medical || isMedicalPoi(s) ? Stethoscope : MapPin;
+          return (
+            <div
+              key={s.recent ? `recent-${s.address}` : s.local ? `etab-${s.address}` : s.place_id}
+              style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "var(--border-subtle)" : undefined }}
+              onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion(field, s); }}
+              onMouseEnter={() => setSuggestionActiveIndex(i)}
+            >
+              <Icon size={13} style={{ marginRight: 6, flexShrink: 0, color: pinned ? "#FFB43A" : undefined }} fill={pinned ? "#FFB43A" : "none"} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                {label}
+                {s.detail && <span style={{ display: "block", fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{s.detail}</span>}
+              </span>
+              {dist && <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
+              {isLocal && (
+                <button
+                  type="button"
+                  aria-label={pinned ? "Retirer des favoris" : "Ajouter aux favoris"}
+                  title={pinned ? "Retirer des favoris" : "Ajouter aux favoris"}
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleSuggestionPinned(s); }}
+                  style={{ background: "none", border: "none", padding: "6px 0 6px 10px", marginRight: -2, cursor: "pointer", color: pinned ? "#FFB43A" : "var(--text-faint)", display: "flex", flexShrink: 0 }}
+                >
+                  <Star size={18} fill={pinned ? "#FFB43A" : "none"} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {searching && <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default" }}>Recherche…</div>}
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -3238,38 +3298,7 @@ export default function App() {
                           required
                         />
                       </div>
-                      {activeField === "depart" && searchingAddress && form.depart.trim().length >= 3 && (
-                        <div style={styles.suggestionBox}>
-                          <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default" }}>Recherche…</div>
-                        </div>
-                      )}
-                      {activeField === "depart" && !searchingAddress && suggestionListFor("depart").length > 0 && (
-                        <div style={styles.suggestionBox}>
-                          {form.depart.trim().length < 3 && (
-                            <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid var(--border-subtle)" }}>
-                              Adresses récentes
-                            </div>
-                          )}
-                          {suggestionListFor("depart").map((s, i) => {
-                            const isRecent = !!s.recent;
-                            const label = isRecent ? s.address : shortAddress(s);
-                            const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
-                            const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
-                            return (
-                              <div
-                                key={isRecent ? `recent-${s.address}` : s.place_id}
-                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "var(--border-subtle)" : undefined }}
-                                onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("depart", s); }}
-                                onMouseEnter={() => setSuggestionActiveIndex(i)}
-                              >
-                                <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                                <span style={{ flex: 1 }}>{label}</span>
-                                {dist && <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                      {renderAddressSuggestions("depart")}
                     </div>
                     <div style={{ position: "relative" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 46px 20px 16px" }}>
@@ -3290,38 +3319,7 @@ export default function App() {
                           required
                         />
                       </div>
-                      {activeField === "arrivee" && searchingAddress && form.arrivee.trim().length >= 3 && (
-                        <div style={styles.suggestionBox}>
-                          <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default" }}>Recherche…</div>
-                        </div>
-                      )}
-                      {activeField === "arrivee" && !searchingAddress && suggestionListFor("arrivee").length > 0 && (
-                        <div style={styles.suggestionBox}>
-                          {form.arrivee.trim().length < 3 && (
-                            <div style={{ ...styles.suggestionItem, color: "var(--text-faint)", cursor: "default", minHeight: "auto", padding: "8px 14px", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid var(--border-subtle)" }}>
-                              Adresses récentes
-                            </div>
-                          )}
-                          {suggestionListFor("arrivee").map((s, i) => {
-                            const isRecent = !!s.recent;
-                            const label = isRecent ? s.address : shortAddress(s);
-                            const dist = isRecent ? null : suggestionDistanceLabel(positions[driverName], s);
-                            const Icon = isRecent ? Clock : isMedicalPoi(s) ? Stethoscope : MapPin;
-                            return (
-                              <div
-                                key={isRecent ? `recent-${s.address}` : s.place_id}
-                                style={{ ...styles.suggestionItem, background: i === suggestionActiveIndex ? "var(--border-subtle)" : undefined }}
-                                onMouseDown={(e) => { e.preventDefault(); pickAddressSuggestion("arrivee", s); }}
-                                onMouseEnter={() => setSuggestionActiveIndex(i)}
-                              >
-                                <Icon size={13} style={{ marginRight: 6, flexShrink: 0 }} />
-                                <span style={{ flex: 1 }}>{label}</span>
-                                {dist && <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 8, flexShrink: 0 }}>{dist}</span>}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                      {renderAddressSuggestions("arrivee")}
                     </div>
                     <button type="button" onClick={swapDepartArrivee} style={styles.swapBtn} aria-label="Inverser départ et arrivée" title="Inverser départ et arrivée">
                       ⇅
