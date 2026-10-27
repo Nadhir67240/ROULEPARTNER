@@ -162,6 +162,35 @@ export default function App() {
     const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
     return () => clearTimeout(t);
   }, [resendCooldown]);
+  // Écran « confirme ton email » : le clic sur le lien du mail est détecté tout seul (toutes
+  // les 4 s tant que l'écran est affiché, et dès le retour dans l'appli après être passé par
+  // la boîte mail), plus besoin d'appuyer sur « J'ai confirmé, actualiser ».
+  useEffect(() => {
+    if (!user || user.emailVerified) return undefined;
+    let stopped = false;
+    const check = async () => {
+      if (stopped || document.visibilityState !== "visible") return;
+      try {
+        const refreshed = await reloadUser();
+        // reload() modifie l'objet utilisateur en place : setVerifyNotice force le nouveau rendu.
+        if (!stopped && refreshed?.emailVerified) {
+          setUser(refreshed);
+          setVerifyNotice("Email confirmé ✓");
+        }
+      } catch (e) {
+        // Réseau coupé, etc. : on réessaiera au prochain passage.
+      }
+    };
+    const id = setInterval(check, 4000);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("focus", check);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("focus", check);
+    };
+  }, [user]);
   const [splashSeen, setSplashSeen] = useState(() => {
     try { return sessionStorage.getItem("rp_splash_seen") === "1"; } catch { return false; }
   });
@@ -884,6 +913,24 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  // Erreurs Firebase Auth fréquentes, en clair : avant, toute erreur de connexion affichait
+  // « mot de passe incorrect », même sans réseau ou quand Firebase bloquait après trop
+  // d'essais — le chauffeur croyait s'être trompé et réessayait, ce qui prolongeait le blocage.
+  const authErrorMessage = (code, fallback) => ({
+    "auth/invalid-credential": "Email ou mot de passe incorrect.",
+    "auth/invalid-login-credentials": "Email ou mot de passe incorrect.",
+    "auth/wrong-password": "Email ou mot de passe incorrect.",
+    "auth/user-not-found": "Email ou mot de passe incorrect.",
+    "auth/invalid-email": "Adresse email invalide.",
+    "auth/missing-password": "Indique ton mot de passe.",
+    "auth/too-many-requests": "Trop de tentatives : par sécurité, la connexion est bloquée quelques minutes. Attends un peu, ou utilise « Mot de passe oublié ? ».",
+    "auth/network-request-failed": "Pas de connexion internet (ou bloquée par un VPN / bloqueur de pub). Vérifie ton réseau et réessaie.",
+    "auth/user-disabled": "Ce compte a été désactivé. Contacte l'administrateur.",
+    "auth/email-already-in-use": "Cet email a déjà un compte — connecte-toi plutôt.",
+    "auth/weak-password": "Mot de passe trop faible : au moins 6 caractères.",
+    "auth/operation-not-allowed": "Service de connexion momentanément indisponible. Réessaie plus tard.",
+  })[code] || `${fallback} (${code || "erreur inconnue"})`;
+
   const handleSignUp = async (e) => {
     e.preventDefault();
     setAuthError("");
@@ -910,9 +957,8 @@ export default function App() {
       setAuthError(
         err.message === "license_taken" ? "Ce numéro de licence est déjà associé à un autre compte." :
         err.message === "name_taken" ? "Ce nom est déjà pris par un autre chauffeur — choisis-en un autre (ajoute une initiale, un chiffre…)." :
-        err.code === "auth/email-already-in-use" ? "Cet email a déjà un compte — connecte-toi plutôt." :
-        err.code === "auth/invalid-email" ? "Adresse email invalide." :
-        "Échec de l'inscription. Vérifie tes infos et réessaie."
+        err.message === "profile_failed" ? "Échec de l'inscription : la fiche chauffeur n'a pas pu être créée. Vérifie ta connexion et réessaie." :
+        authErrorMessage(err.code, "Échec de l'inscription. Vérifie tes infos et réessaie")
       );
     }
     setAuthBusy(false);
@@ -925,7 +971,7 @@ export default function App() {
     try {
       await logIn(authEmail.trim(), authPassword);
     } catch (err) {
-      setAuthError("Email ou mot de passe incorrect.");
+      setAuthError(authErrorMessage(err.code, "Connexion impossible. Réessaie dans un instant"));
     }
     setAuthBusy(false);
   };
@@ -949,7 +995,7 @@ export default function App() {
         return;
       }
       if (err.code !== "auth/user-not-found") {
-        setAuthError("Échec de l'envoi. Réessaie plus tard.");
+        setAuthError(authErrorMessage(err.code, "Échec de l'envoi. Réessaie plus tard"));
         setAuthBusy(false);
         return;
       }
@@ -2504,7 +2550,7 @@ export default function App() {
           <h1 style={styles.gateTitle}>RoulePartner</h1>
           <p style={styles.gateSub}>
             Un email de confirmation a été envoyé à <strong>{user.email}</strong>. Clique sur le lien qu'il
-            contient, puis reviens ici.
+            contient : l'appli s'ouvrira toute seule dès que c'est fait.
           </p>
           <p style={styles.gateSub}>
             <strong>Tu ne le trouves pas ?</strong> Regarde dans tes <strong>spams</strong> ou ton dossier
