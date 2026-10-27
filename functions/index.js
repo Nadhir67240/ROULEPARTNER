@@ -217,6 +217,16 @@ async function notifyAssignees(rideId, ride, names) {
   });
 }
 
+// Course (r)envoyée ou relâchée : le chrono des relances repart de zéro. Cette écriture
+// redéclenche notifyRideStatusChange, qui n'y voit aucun changement à notifier.
+function restartAssignClock(rideId) {
+  return db.collection("rides").doc(rideId).update({
+    assignSentAt: Date.now(),
+    assignNudgedAt: admin.firestore.FieldValue.delete(),
+    assignPosterAlertedAt: admin.firestore.FieldValue.delete(),
+  }).catch((e) => console.error(`chrono relance ${rideId}:`, e.message));
+}
+
 // Réponses des chauffeurs choisis et changements de destinataires.
 // Renvoie true si l'événement a été entièrement traité ici.
 async function handleAssignmentChange(rideId, before, after) {
@@ -235,6 +245,7 @@ async function handleAssignmentChange(rideId, before, after) {
   // Relâchée par celui qui l'avait acceptée : elle repart aux autres choisis. Le posteur
   // est prévenu du relâchement par la suite de notifyRideStatusChange (return false).
   if (before.status === "prise" && assigneesOf(after).length > 0) {
+    await restartAssignClock(rideId);
     await notifyAssignees(rideId, after, pendingOf(after));
     return false;
   }
@@ -259,6 +270,7 @@ async function handleAssignmentChange(rideId, before, after) {
   // Le posteur la (r)envoie : on prévient ceux à qui elle vient d'être proposée.
   const newlyPending = pendingOf(after).filter((n) => !pendingOf(before).includes(n));
   if (newlyPending.length > 0) {
+    await restartAssignClock(rideId);
     await notifyAssignees(rideId, after, newlyPending);
     return true;
   }
@@ -290,7 +302,8 @@ exports.notifyNewRide = onDocumentCreated(
     // on ne prévient qu'eux. priorityDrivers vide = ouverte à tous tout de suite si le
     // posteur la publie plus tard (les règles exigent que le champ existe).
     if (assigneesOf(ride).length > 0) {
-      await snap.ref.update({ priorityDrivers: [], priorityUntil: 0 });
+      // assignSentAt : départ du chrono des relances (sendAssignmentNudges).
+      await snap.ref.update({ priorityDrivers: [], priorityUntil: 0, assignSentAt: ride.createdAt || Date.now() });
       await notifyAssignees(event.params.rideId, ride, pendingOf(ride));
       return;
     }
@@ -471,11 +484,72 @@ async function sendPickupReminders(now = Date.now()) {
   return due.map((d) => d.doc.id);
 }
 
+// --- Relances des courses envoyées à des chauffeurs choisis, restées sans réponse ---
+// 1) Les choisis qui n'ont pas répondu reçoivent un rappel ; 2) plus tard, le posteur est
+// prévenu, pour qu'il la renvoie à d'autres ou la publie à tous. Jamais de publication
+// automatique : c'est toujours le posteur qui décide (choix de l'utilisateur, 2026-10-27).
+// Délais comptés depuis l'envoi (assignSentAt, remis à zéro à chaque renvoi/relâchement),
+// raccourcis quand la prise en charge approche. Une seule relance de chaque type par envoi.
+const ASSIGN_NUDGE_MS = 10 * 60 * 1000;
+const ASSIGN_POSTER_ALERT_MS = 20 * 60 * 1000;
+const ASSIGN_SOON_LEAD_MS = 60 * 60 * 1000; // prise en charge dans moins d'1 h : délais ÷ 2
+const ASSIGN_URGENT_LEAD_MS = 30 * 60 * 1000; // dans moins de 30 min : posteur prévenu sans attendre...
+const ASSIGN_MIN_WAIT_MS = 5 * 60 * 1000; // ...mais pas avant 5 min, il vient peut-être de l'envoyer
+
+async function sendAssignmentNudges(now = Date.now()) {
+  const snap = await db.collection("rides").where("status", "==", "disponible").get();
+  const done = [];
+  for (const doc of snap.docs) {
+    const r = doc.data();
+    if (r.deleted || assigneesOf(r).length === 0) continue;
+    const pending = pendingOf(r);
+    if (pending.length === 0) continue; // tous ont refusé : le posteur a déjà été prévenu
+    const sentAt = r.assignSentAt || r.createdAt;
+    if (!sentAt) continue;
+    const pickupAt = r.date && r.heure ? parisTimeToUtcMs(r.date, r.heure) : null;
+    if (pickupAt != null && pickupAt < now) continue; // trop tard, inutile de relancer
+    const lead = pickupAt != null ? pickupAt - now : Infinity;
+    const factor = lead < ASSIGN_SOON_LEAD_MS ? 0.5 : 1;
+    const waited = now - sentAt;
+    const route = `${r.depart} → ${r.arrivee}${r.heure ? ` — ${r.heure}` : ""}`;
+
+    if (!r.assignNudgedAt && waited >= ASSIGN_NUDGE_MS * factor) {
+      // Marqué AVANT l'envoi : si l'envoi échoue, on ne relance pas toutes les 5 min.
+      await doc.ref.update({ assignNudgedAt: now });
+      await sendTo(await tokensFor(pending), {
+        notification: { title: "📨 Rappel — course en attente de ta réponse", body: `${r.postedBy} attend ta réponse : ${route}` },
+        data: { ...rideData(doc.id, r), priority: "true", shared: String(assigneesOf(r).length > 1) },
+        requireInteraction: true,
+      }).catch((e) => console.error(`relance ${doc.id}:`, e.message));
+      done.push(`${doc.id}:choisis`);
+    }
+
+    const posterDue = waited >= ASSIGN_POSTER_ALERT_MS * factor
+      || (lead < ASSIGN_URGENT_LEAD_MS && waited >= ASSIGN_MIN_WAIT_MS);
+    if (!r.assignPosterAlertedAt && posterDue) {
+      await doc.ref.update({ assignPosterAlertedAt: now });
+      const who = pending.length === 1 ? `${pending[0]} n'a pas répondu` : "Personne n'a répondu";
+      await sendTo(await tokensFor([r.postedBy]), {
+        notification: {
+          title: "⏳ Course sans réponse",
+          body: `${who} pour ${route}. Renvoie-la à d'autres chauffeurs ou publie-la à tous.`,
+        },
+        data: rideData(doc.id, r),
+        requireInteraction: true,
+      }).catch((e) => console.error(`alerte posteur ${doc.id}:`, e.message));
+      done.push(`${doc.id}:posteur`);
+    }
+  }
+  return done;
+}
+
 exports.remindUpcomingRides = onSchedule(
   { schedule: "every 5 minutes", timeZone: "Europe/Paris", timeoutSeconds: 60 },
   async () => {
     const sent = await sendPickupReminders();
     if (sent.length) console.log(`remindUpcomingRides: ${sent.length} rappel(s) — ${sent.join(", ")}`);
+    const nudges = await sendAssignmentNudges().catch((e) => { console.error("relances:", e.message); return []; });
+    if (nudges.length) console.log(`remindUpcomingRides: relances — ${nudges.join(", ")}`);
   }
 );
 // Prévient l'admin à chaque nouvelle inscription de chauffeur. Déclenchée par la création

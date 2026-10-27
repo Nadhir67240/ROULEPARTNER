@@ -1921,12 +1921,15 @@ export default function App() {
     }
     if (r.postedBy !== driverName) return null;
     const allRefused = pending.length === 0;
+    // Depuis l'envoi (ou le dernier renvoi/relâchement : assignSentAt, écrit par la fonction Cloud).
+    const waitingMin = Math.floor((Date.now() - (r.assignSentAt || r.createdAt || Date.now())) / 60000);
+    const waitingLabel = waitingMin < 1 ? "" : waitingMin < 60 ? ` depuis ${waitingMin} min` : ` depuis ${Math.floor(waitingMin / 60)} h ${String(waitingMin % 60).padStart(2, "0")}`;
     return (
       <div style={styles.pendingBanner} onClick={(e) => e.stopPropagation()}>
         <div>
           {allRefused
             ? <>❌ {refusedBy.length > 1 ? <>Tous ont refusé ({namesLabel(refusedBy)})</> : <><strong>{refusedBy[0]}</strong> a refusé</>}. Que veux-tu en faire ?</>
-            : <>📨 Envoyée à <strong>{namesLabel(pending)}</strong>{pending.length > 1 ? " — le premier qui accepte l'obtient" : " seulement"}. En attente de réponse.</>}
+            : <>📨 Envoyée à <strong>{namesLabel(pending)}</strong>{pending.length > 1 ? " — le premier qui accepte l'obtient" : " seulement"}. Pas de réponse{waitingLabel}.</>}
         </div>
         {!allRefused && refusedBy.length > 0 && (
           <div style={{ fontSize: 12.5, marginTop: 4, opacity: 0.8 }}>Refusée par {namesLabel(refusedBy)}.</div>
