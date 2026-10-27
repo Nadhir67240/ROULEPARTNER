@@ -1,5 +1,18 @@
-import { ETABLISSEMENTS } from "./etablissements";
+import { ETABLISSEMENTS as GENERATED } from "./etablissements";
+import { EXTRA_ETABLISSEMENTS, EXTRA_OVERRIDES } from "./etablissementsExtra";
 import { distanceKm, shortAddress } from "./geo";
+
+// Catalogue généré depuis OSM + compléments manuels (corrections et établissements manquants).
+const ETABLISSEMENTS = [
+  ...GENERATED.map((e) => {
+    const o = EXTRA_OVERRIDES[e.name];
+    if (!o) return e;
+    // L'ancien nom OSM reste cherchable en alias quand l'entrée est renommée.
+    const aliases = [...(e.aliases || []), ...(o.name ? [e.name] : []), ...(o.aliases || [])];
+    return { ...e, name: o.name || e.name, aliases };
+  }),
+  ...EXTRA_ETABLISSEMENTS,
+];
 
 // Raccourcis d'adresse instantanés, sans réseau : les adresses déjà utilisées par le chauffeur
 // (favoris + fréquentes, voir storage.js) et le catalogue local des hôpitaux/cliniques d'Alsace
