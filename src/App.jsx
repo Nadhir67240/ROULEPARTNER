@@ -289,6 +289,45 @@ export default function App() {
     };
   }, [chatRideId]);
 
+  // Clavier ouvert (un champ texte a le focus) : on cache la barre du bas. Sur Android (appli
+  // installée, WebView), l'écran se redimensionne au-dessus du clavier et une barre fixe en bas
+  // remonterait avec lui, mangeant la moitié de la place restante pour la saisie.
+  const [typingFocus, setTypingFocus] = useState(false);
+  useEffect(() => {
+    const NO_KEYBOARD_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "file", "color", "image"]);
+    const opensKeyboard = (el) =>
+      !!el && (el.tagName === "TEXTAREA" || el.isContentEditable || (el.tagName === "INPUT" && !NO_KEYBOARD_INPUTS.has(el.type)));
+    // Sur PC (souris, pas de clavier virtuel), la barre reste affichée en permanence.
+    if (!window.matchMedia?.("(pointer: coarse)").matches) return;
+    const onFocusIn = (e) => { if (opensKeyboard(e.target)) setTypingFocus(true); };
+    // Le focus peut passer directement d'un champ à l'autre : on regarde où il a atterri.
+    const onFocusOut = () => setTimeout(() => setTypingFocus(opensKeyboard(document.activeElement)), 0);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
+  // Sections de la barre du bas : Courses, Messages et Compte s'ouvrent au-dessus de l'accueil
+  // mais s'arrêtent au-dessus de la barre, qui reste visible pour passer de l'une à l'autre.
+  const openTab = (tab) => {
+    setShowMyCoursesPanel(tab === "courses");
+    setShowMessagesPanel(tab === "messages");
+    setShowAccountPanel(tab === "compte");
+    if (tab !== "compte") { setAccountSubPanel(null); setGroupEdit(null); }
+    if (tab === "accueil") setFilter("dispo");
+  };
+  const tabPanelOpen = showMyCoursesPanel || showMessagesPanel || showAccountPanel;
+  const tabPanelStyle = {
+    ...styles.wizardOverlay,
+    // Sous la barre (zIndex 90) et le bouton + (91) ; les fenêtres ouvertes depuis ces sections
+    // (modales à 100 et plus) passent toujours par-dessus.
+    zIndex: 89,
+    bottom: typingFocus ? 0 : "calc(66px + env(safe-area-inset-bottom, 0px))",
+  };
+
   // La zone de saisie grandit avec le texte (jusqu'à ~5 lignes).
   useEffect(() => {
     const el = chatInputRef.current;
@@ -2726,6 +2765,7 @@ export default function App() {
         .rp-nav-item:active { transform: scale(0.92); }
         .rp-fab-floating { -webkit-tap-highlight-color: transparent; transition: transform 0.15s ease, box-shadow 0.15s ease; }
         .rp-fab-floating:active { transform: translateX(-50%) scale(0.92) !important; }
+        .rp-bottom-nav.rp-nav-hidden, .rp-fab-floating.rp-nav-hidden { display: none !important; }
       `}</style>
 
       {/* Fenêtre « Envoyer à » : recherche + liste à cocher, raccourcis de groupes. */}
@@ -4358,13 +4398,13 @@ export default function App() {
 
       <div className="rp-bottom-spacer" />
 
-      <nav className="rp-bottom-nav" style={styles.bottomNav}>
-        <BottomNavItem icon={Home} label="Accueil" active={filter === "dispo"} badge={newRidesBadge} onClick={() => setFilter("dispo")} />
-        <BottomNavItem icon={Car} label="Courses" onClick={() => setShowMyCoursesPanel(true)} />
+      <nav className={`rp-bottom-nav${typingFocus ? " rp-nav-hidden" : ""}`} style={styles.bottomNav}>
+        <BottomNavItem icon={Home} label="Accueil" active={!tabPanelOpen && filter === "dispo"} badge={newRidesBadge} onClick={() => openTab("accueil")} />
+        <BottomNavItem icon={Car} label="Courses" active={showMyCoursesPanel} onClick={() => openTab("courses")} />
         {/* Emplacement réservé au bouton + flottant, pour qu'il ne recouvre aucun onglet. */}
         <div style={styles.bottomNavFabSlot} aria-hidden="true" />
-        <BottomNavItem icon={MessageCircle} label="Messages" badge={totalUnreadMessages} onClick={() => setShowMessagesPanel(true)} />
-        <BottomNavItem icon={User} label="Compte" onClick={() => setShowAccountPanel(true)} />
+        <BottomNavItem icon={MessageCircle} label="Messages" active={showMessagesPanel} badge={totalUnreadMessages} onClick={() => openTab("messages")} />
+        <BottomNavItem icon={User} label="Compte" active={showAccountPanel} onClick={() => openTab("compte")} />
       </nav>
       <button
         onClick={() => {
@@ -4382,7 +4422,7 @@ export default function App() {
             setShowForm(true);
           }
         }}
-        className="rp-fab-floating"
+        className={`rp-fab-floating${typingFocus ? " rp-nav-hidden" : ""}`}
         style={styles.bottomNavFabFloating}
         aria-label={showForm ? "Fermer le formulaire" : "Poster une course"}
       >
@@ -4390,7 +4430,7 @@ export default function App() {
       </button>
 
       {showAccountPanel && (
-        <div style={styles.wizardOverlay}>
+        <div style={tabPanelStyle}>
           <div style={styles.fullPageHeader}>
             {accountSubPanel ? (
               <button onClick={() => (groupEdit ? setGroupEdit(null) : setAccountSubPanel(null))} style={styles.wizardNavBtn} aria-label="Retour">
@@ -5183,7 +5223,7 @@ export default function App() {
       )}
 
       {showMyCoursesPanel && (
-        <div style={styles.wizardOverlay}>
+        <div style={tabPanelStyle}>
           <div style={styles.fullPageHeader}>
             <span style={{ width: 38 }} />
             <h2 style={styles.fullPageTitle}>Mes courses</h2>
@@ -5245,7 +5285,7 @@ export default function App() {
       )}
 
       {showMessagesPanel && (
-        <div style={styles.wizardOverlay}>
+        <div style={tabPanelStyle}>
           <div style={{ ...styles.fullPageHeader, paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)" }}>
             <span style={{ width: 38 }} />
             <h2 style={{ ...styles.fullPageTitle, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -5260,7 +5300,7 @@ export default function App() {
               <X size={20} />
             </button>
           </div>
-          <div style={{ ...styles.wizardBody, padding: "8px 0 calc(env(safe-area-inset-bottom, 0px) + 20px)" }}>
+          <div style={{ ...styles.wizardBody, padding: "8px 0 20px" }}>
             {conversations.length === 0 ? (
               <div style={{ textAlign: "center", padding: "56px 32px", color: "var(--text-muted)" }}>
                 <div style={styles.chatEmptyIcon}><MessageCircle size={26} /></div>
