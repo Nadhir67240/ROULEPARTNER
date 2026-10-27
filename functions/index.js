@@ -2,6 +2,7 @@ const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { setGlobalOptions } = require("firebase-functions/v2");
+const { defineSecret } = require("firebase-functions/params");
 // Les événements Firebase Auth (création / suppression de compte) n'existent qu'en v1.
 const functionsV1 = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -592,6 +593,75 @@ exports.assignProfileEmail = onCall({ timeoutSeconds: 30 }, async (request) => {
 
   await db.collection("profiles").doc(name).set({ email }, { merge: true });
   return { ok: true };
+});
+
+// --- Distance routière (calcul du tarif) ---
+// L'appli ne contacte plus directement un serveur d'itinéraire : elle passe par cette
+// fonction, qui garde la clé OpenRouteService secrète (secret Firebase ORS_API_KEY, jamais
+// dans le code) et met en cache chaque trajet déjà calculé (collection routeCache, invisible
+// des clients : aucune règle Firestore ne l'ouvre). Secours : serveur public OSRM. Si rien ne
+// répond, { km: null } — l'appli affiche alors une distance approximative à vérifier.
+const ORS_API_KEY = defineSecret("ORS_API_KEY");
+const ROUTE_CACHE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000; // routes refaites/déviations : on recalcule après 3 mois
+
+async function fetchJson(url, options, timeoutMs) {
+  const res = await fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function orsDistanceKm(from, to) {
+  const data = await fetchJson(
+    `https://api.openrouteservice.org/v2/directions/driving-car?start=${from.lng},${from.lat}&end=${to.lng},${to.lat}`,
+    { headers: { Authorization: ORS_API_KEY.value() } },
+    8000
+  );
+  const m = data.features?.[0]?.properties?.summary?.distance;
+  return typeof m === "number" ? m / 1000 : null;
+}
+
+async function osrmDistanceKm(from, to) {
+  const data = await fetchJson(
+    `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`,
+    {},
+    6000
+  );
+  return data.code === "Ok" && data.routes?.[0] ? data.routes[0].distance / 1000 : null;
+}
+
+function validPoint(p) {
+  // France métropolitaine et alentours (zones frontalières : Bâle, Kehl, Karlsruhe...).
+  return p && typeof p.lat === "number" && typeof p.lng === "number"
+    && p.lat > 41 && p.lat < 52 && p.lng > -6 && p.lng < 10;
+}
+
+exports.routeDistance = onCall({ secrets: [ORS_API_KEY], timeoutSeconds: 20 }, async (request) => {
+  if (!request.auth?.token?.email_verified) {
+    throw new HttpsError("permission-denied", "Compte non vérifié.");
+  }
+  const { from, to } = request.data || {};
+  if (!validPoint(from) || !validPoint(to)) throw new HttpsError("invalid-argument", "Coordonnées invalides.");
+
+  // ~10 m de précision : deux saisies du même hôpital/de la même adresse tombent sur la même clé.
+  const r = (x) => x.toFixed(4);
+  const cacheRef = db.collection("routeCache").doc(`${r(from.lat)},${r(from.lng)}_${r(to.lat)},${r(to.lng)}`);
+  const cached = await cacheRef.get().catch(() => null);
+  if (cached?.exists && Date.now() - cached.data().at < ROUTE_CACHE_MAX_AGE_MS) {
+    return { km: cached.data().km, source: cached.data().source, cached: true };
+  }
+
+  for (const [source, compute] of [["ors", orsDistanceKm], ["osrm", osrmDistanceKm]]) {
+    try {
+      const km = await compute(from, to);
+      if (km != null) {
+        await cacheRef.set({ km, source, at: Date.now() }).catch(() => {});
+        return { km, source };
+      }
+    } catch (e) {
+      console.warn(`routeDistance: ${source} indisponible`, e.message);
+    }
+  }
+  return { km: null };
 });
 
 // --- Synchro avec Firebase Auth ---

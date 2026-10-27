@@ -181,25 +181,8 @@ export function distanceKm(a, b) {
 // course : l'adresse de départ géocodée (précise) en priorité, sinon la
 // position du chauffeur au moment du post (ancienne méthode, moins précise,
 // gardée en secours pour les courses créées avant ce correctif).
-// Distance routière réelle via OSRM (service public gratuit, sans clé API,
-// mais non garanti à 100% en disponibilité — on retombe sur la distance à vol
-// d'oiseau si ça échoue ou met trop de temps, pour ne jamais bloquer le calcul).
-export async function fetchRoadDistanceKm(from, to) {
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.code !== "Ok" || !data.routes?.[0]) return null;
-    return data.routes[0].distance / 1000; // mètres -> km
-  } catch (e) {
-    return null;
-  }
-}
-
+// (La distance routière, elle, passe par la fonction Cloud routeDistance : voir
+// fetchRouteDistanceKm dans firebase.js.)
 export function ridePickupCoords(r) {
   if (r.departLat != null && r.departLng != null) return { lat: r.departLat, lng: r.departLng };
   if (r.lat != null && r.lng != null) return { lat: r.lat, lng: r.lng };

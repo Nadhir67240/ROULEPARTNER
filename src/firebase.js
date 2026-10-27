@@ -590,6 +590,19 @@ export async function assignProfileEmail(name, email) {
   return res.data;
 }
 
+// Distance routière en km (calcul du tarif), via la fonction Cloud routeDistance
+// (OpenRouteService, cache, secours OSRM). null si aucun service n'a répondu à temps : à
+// l'appelant de retomber sur une estimation. 15 s : couvre le démarrage à froid de la fonction.
+const routeDistanceCall = httpsCallable(functions, "routeDistance", { timeout: 15000 });
+export async function fetchRouteDistanceKm(from, to) {
+  try {
+    const res = await routeDistanceCall({ from: { lat: from.lat, lng: from.lng }, to: { lat: to.lat, lng: to.lng } });
+    return typeof res.data?.km === "number" ? res.data.km : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Clé publique VAPID générée dans Firebase Console > Paramètres > Cloud Messaging.
 const VAPID_KEY = "BJM083fCjLvVEZNnP2NmsQM146hHmdKNIpZTIMCFx9IXScg1qJH4gWFgiEUPdGqrL_skfBXpajgSiDnRF_D5Eks";
 

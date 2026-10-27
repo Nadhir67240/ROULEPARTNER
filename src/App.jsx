@@ -17,7 +17,7 @@ import {
   setDriverBanned, deleteDriverAccount, restoreDriverAccount, registerFcmToken, backfillProfileEmails, assignProfileEmail, syncDriversWithAuth, ensureOwnProfile,
   isAssignedRide, rideAssignees, rideAssignRefused, rideAssigneesPending, refuseAssignedRide, releaseAssignedRide, sendRideToDrivers, listenMyGroups, saveMyGroups,
   watchAuthState, signUp, logIn, logOut, deleteOwnAccount, resendVerificationEmail, reloadUser, requestPasswordReset,
-  listenForegroundMessages,
+  listenForegroundMessages, fetchRouteDistanceKm,
 } from "./firebase";
 import { TYPES, TRAJET_TYPES, trajetLabel, PRIORITY_WINDOW_MS, POSITION_FRESH_MS, POSITION_WRITE_MIN_MS, POSITION_WRITE_MAX_MS, POSITION_WRITE_MIN_KM, AVG_SPEED_KMH, CLAIM_CONFIRM_WINDOW_MS, AUTO_PURGE_DAYS, ADMIN_EMAIL, emptyForm, uid, typeMeta, tintBg, statusColor } from "./lib/constants";
 import { DEPARTMENT_KM_RATES, DEFAULT_DEPARTMENT, DEFAULT_KM_RATE, computeTaxiConventionneTarif, computeTaxiPayantTarif, isTaxiPayantNuit, TAXI_PAYANT_KM_RATES, TAXI_PAYANT_PEC, TAXI_PAYANT_HEURE_ATTENTE, autoDetectNightWeekend, addressCityDept, isGrandeVilleZone, matchesGrandeVilleExtension } from "./lib/tarif";
@@ -25,7 +25,7 @@ import { formatPostedAt, dateKey, todayKey, timePlusMinutes, formatRideDate, FRE
 import { unlockAudio, vibrate, playAlertSound, notifyNewRide, notifyPriorityRide, notifyClaimRequest, notifyRideReleased, notifyStatusChange, notifyRideModified, notifyNewMessage, notifyAssignedRide, notifyAssignRefused } from "./lib/alerts";
 import { loadRideDraft, saveRideDraft, clearRideDraft, loadRecentAddresses, saveRecentAddress, toggleAddressPinned, RECENT_ADDRESSES_SHOWN } from "./lib/storage";
 import { localAddressMatches, dropDuplicateResults } from "./lib/addressShortcuts";
-import { computePriorityDrivers, distanceKm, fetchRoadDistanceKm, ridePickupCoords, wazeUrl, googleMapsUrl, cardLocality, shortAddress, isMedicalPoi, fetchBanSuggestions, interleaveResults, rankAddressResults, suggestionDistanceLabel } from "./lib/geo";
+import { computePriorityDrivers, distanceKm, ridePickupCoords, wazeUrl, googleMapsUrl, cardLocality, shortAddress, isMedicalPoi, fetchBanSuggestions, interleaveResults, rankAddressResults, suggestionDistanceLabel } from "./lib/geo";
 import { compressPhoto, openPdfDocument } from "./lib/files";
 import { AuthSplash, AuthBackdrop, AuthVehicleStrip } from "./components/AuthScreens";
 import { styles } from "./styles";
@@ -723,11 +723,12 @@ export default function App() {
     // Commune/département déjà connus pour un choix récent, sinon extraits du résultat de
     // recherche — servent à détecter automatiquement le forfait "grande ville" (taxi conventionné).
     const { city, dept } = ready ? { city: item.city || "", dept: item.dept || "" } : addressCityDept(item);
+    // Nouvelle adresse : les km saisis à la main pour l'ancien trajet ne valent plus.
     if (field === "depart") {
-      setForm({ ...form, depart: address, departLat: lat, departLng: lng, departCity: city, departDept: dept });
+      setForm({ ...form, depart: address, departLat: lat, departLng: lng, departCity: city, departDept: dept, kmManuel: "" });
       setDepartSuggestions([]);
     } else {
-      setForm({ ...form, arrivee: address, arriveeLat: lat, arriveeLng: lng, arriveeCity: city, arriveeDept: dept });
+      setForm({ ...form, arrivee: address, arriveeLat: lat, arriveeLng: lng, arriveeCity: city, arriveeDept: dept, kmManuel: "" });
       setArriveeSuggestions([]);
     }
     setActiveField(null);
@@ -753,6 +754,65 @@ export default function App() {
     } else if (e.key === "Escape") {
       setActiveField(null);
     }
+  };
+
+  // Distance utilisée pour le tarif, juste au-dessus du montant : discrète quand elle vient du
+  // calcul routier, alerte orange avec saisie des km quand elle n'est qu'approximative (aucun
+  // service n'a répondu → vol d'oiseau, plus court que la route) ou qu'elle manque (adresse
+  // tapée sans choisir de suggestion). Les km saisis priment sur tout calcul.
+  const renderDistanceCheck = () => {
+    if (calculatingTarif && !form.kmManuel) return null;
+    const approx = form.calcDistanceKm != null && !form.calcIsRoadDistance && !form.calcKmManual;
+    const missing = form.calcDistanceKm == null && !form.kmManuel && (form.departLat == null || form.arriveeLat == null) && form.depart && form.arrivee;
+    const manual = !!form.kmManuel || form.calcKmManual;
+    const kmInput = (
+      <input
+        aria-label="Distance en km"
+        inputMode="decimal"
+        placeholder="km"
+        value={form.kmManuel || ""}
+        onChange={(e) => setForm({ ...form, kmManuel: e.target.value.replace(/[^0-9.,]/g, "") })}
+        style={{ ...styles.input, width: 90, textAlign: "center", fontWeight: 800, padding: "8px 10px" }}
+      />
+    );
+    if (approx || missing || manual) {
+      const warn = approx || missing;
+      return (
+        <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${warn ? "#FFB43A" : "var(--border-subtle)"}`, background: warn ? "rgba(255,180,58,0.12)" : "transparent" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>
+            {manual ? "Distance saisie à la main"
+              : approx ? `⚠️ Distance approximative : ${form.calcDistanceKm} km à vol d'oiseau`
+              : "⚠️ Distance inconnue : adresse choisie hors de la liste"}
+          </div>
+          {warn && (
+            <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginBottom: 8 }}>
+              {approx ? "Le calcul de l'itinéraire n'a pas répondu, la route est plus longue : vérifie les km, le tarif se recalcule."
+                : "Choisis l'adresse dans la liste, ou saisis les km du trajet pour calculer le tarif."}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {kmInput}
+            <span style={{ fontSize: 13, color: "var(--text-muted)" }}>km {form.trajet === "allerRetour" ? "(aller simple)" : ""}</span>
+            {manual && (
+              <button type="button" onClick={() => setForm({ ...form, kmManuel: "", calcKmManual: false })}
+                style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--accent-text)", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                Recalculer
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+    if (form.calcDistanceKm == null) return null;
+    return (
+      <div style={{ textAlign: "center", marginTop: 10, fontSize: 12.5, color: "var(--text-muted)" }}>
+        {form.calcDistanceKm} km par la route ·{" "}
+        <button type="button" onClick={() => setForm({ ...form, kmManuel: String(form.calcDistanceKm).replace(".", ",") })}
+          style={{ background: "none", border: "none", padding: 0, color: "var(--accent-text)", fontWeight: 700, fontSize: 12.5, cursor: "pointer" }}>
+          corriger les km
+        </button>
+      </div>
+    );
   };
 
   // Liste de suggestions sous un champ d'adresse (départ/arrivée) : raccourcis locaux en tête
@@ -1431,8 +1491,9 @@ export default function App() {
 
   // Recalcule automatiquement le tarif "Taxi conventionné" dès que la distance,
   // le trajet ou les majorations changent — plus besoin de cliquer sur un bouton.
-  // Essaie d'abord la vraie distance routière (OSRM), retombe sur le vol d'oiseau
-  // si le service externe ne répond pas.
+  // Distance routière via la fonction Cloud routeDistance ; si aucun service ne répond, on
+  // retombe sur le vol d'oiseau, signalé par une alerte bien visible où le chauffeur peut
+  // saisir lui-même les km (kmManuel), qui priment alors sur tout calcul.
   const [calculatingTarif, setCalculatingTarif] = useState(false);
   useEffect(() => {
     const payant = form.type === "taxi_payant";
@@ -1448,18 +1509,21 @@ export default function App() {
       orig.retourAVide === form.retourAVide && orig.tpmr === form.tpmr &&
       orig.payantNuit === form.payantNuit && orig.attenteMin === form.attenteMin &&
       orig.bagages === form.bagages && orig.passagers === form.passagers &&
-      orig.forfait === form.forfait
+      orig.forfait === form.forfait && orig.kmManuel === (form.kmManuel || "")
     ) {
       return; // rien de tarif-sensible n'a changé depuis l'ouverture de la modification
     }
     const depart = { lat: form.departLat, lng: form.departLng };
     const arrivee = { lat: form.arriveeLat, lng: form.arriveeLng };
-    if (depart.lat == null || arrivee.lat == null) return;
+    const manualKm = parseFloat(String(form.kmManuel || "").replace(",", "."));
+    const hasManualKm = manualKm > 0;
+    // Avec des km saisis à la main, pas besoin des coordonnées (adresse tapée sans suggestion).
+    if (!hasManualKm && (depart.lat == null || arrivee.lat == null)) return;
     let cancelled = false;
     setCalculatingTarif(true);
     (async () => {
-      let distKm = await fetchRoadDistanceKm(depart, arrivee);
-      let isRoadDistance = true;
+      let distKm = hasManualKm ? manualKm : await fetchRouteDistanceKm(depart, arrivee);
+      let isRoadDistance = !hasManualKm;
       if (distKm == null) {
         distKm = distanceKm(depart, arrivee);
         isRoadDistance = false;
@@ -1494,6 +1558,7 @@ export default function App() {
         tarifLettre: payant ? paid.lettre : "",
         calcDistanceKm: Math.round(distKm * 10) / 10,
         calcIsRoadDistance: isRoadDistance,
+        calcKmManual: hasManualKm,
       }));
       setCalculatingTarif(false);
     })();
@@ -1505,7 +1570,7 @@ export default function App() {
     form.type, form.trajet, form.departLat, form.departLng,
     form.arriveeLat, form.arriveeLng, form.grandeVille, form.majorationNuitWeekend,
     form.retourAVide, form.tpmr, kmRate,
-    form.payantNuit, form.attenteMin, form.bagages, form.passagers, form.forfait,
+    form.payantNuit, form.attenteMin, form.bagages, form.passagers, form.forfait, form.kmManuel,
   ]);
 
   const handlePhotoChange = async (e) => {
@@ -1572,7 +1637,7 @@ export default function App() {
       trajet: r.trajet, grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, tpmr: r.tpmr || false, heure: r.heure, date: r.date || "",
       payantNuit: r.payantNuit || false, attenteMin: r.attenteMin || 0, bagages: r.bagages || 0, passagers: r.passagers || 1,
-      forfait: r.forfait || false,
+      forfait: r.forfait || false, kmManuel: r.kmManuel || "",
     };
     setForm({
       type: r.type, patient: r.patient, patientTel: r.patientTel || "", depart: r.depart, arrivee: r.arrivee,
@@ -1581,6 +1646,7 @@ export default function App() {
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
+      kmManuel: r.kmManuel || "", calcKmManual: r.calcKmManual || false,
       payantNuit: r.payantNuit || false, attenteMin: r.attenteMin || 0, bagages: r.bagages || 0, passagers: r.passagers || 1, tarifLettre: r.tarifLettre || "", forfait: r.forfait || false,
       ...att,
     });
@@ -1605,6 +1671,7 @@ export default function App() {
       arriveeLat: r.arriveeLat, arriveeLng: r.arriveeLng, arriveeCity: r.arriveeCity || "", arriveeDept: r.arriveeDept || "",
       grandeVille: r.grandeVille || false, majorationNuitWeekend: r.majorationNuitWeekend || false,
       retourAVide: r.retourAVide || false, calcDistanceKm: r.calcDistanceKm ?? null, calcIsRoadDistance: r.calcIsRoadDistance ?? false,
+      kmManuel: r.kmManuel || "", calcKmManual: r.calcKmManual || false,
       payantNuit: r.payantNuit || false, attenteMin: r.attenteMin || 0, bagages: r.bagages || 0, passagers: r.passagers || 1, tarifLettre: r.tarifLettre || "", forfait: r.forfait || false,
       ...att,
     });
@@ -3645,6 +3712,7 @@ export default function App() {
                             onChange={(e) => setForm({ ...form, retourAVide: e.target.checked })} />
                           Retour à vide (hospitalisation/dialyse)
                         </label>
+                        {renderDistanceCheck()}
                         <div style={{ padding: "18px 16px", borderRadius: 14, background: "var(--surface-tile)", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 12 }}>
                           <span style={{ fontFamily: "'Manrope', sans-serif", fontSize: 30, fontWeight: 800, letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
                             {calculatingTarif ? "…" : form.tarif ? `${form.tarif} €` : "—"}
@@ -3717,6 +3785,7 @@ export default function App() {
                           {stepper("Passagers", "passagers", 1, "+4 € par passager à partir du 5e")}
                           {stepper("Bagages volumineux", "bagages", 0, "+2 € par bagage qui ne tient pas sur les genoux")}
                           {ar && stepper("Attente sur place", "attenteMin", 0, `${TAXI_PAYANT_HEURE_ATTENTE.toFixed(2).replace(".", ",")} €/h`)}
+                          {renderDistanceCheck()}
                           <div style={{ padding: "14px 16px", borderRadius: 14, background: "var(--surface-tile)", marginTop: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                             <input
                               aria-label="Tarif de la course (€)"
@@ -3971,7 +4040,7 @@ export default function App() {
                   {r.heureRetour && <span style={styles.metaItem}>Retour : {r.heureRetour}</span>}
                   {r.calcDistanceKm != null && (
                     <span style={styles.metaItem}>
-                      ({r.calcDistanceKm} km {r.calcIsRoadDistance ? "réels (route)" : "à vol d'oiseau"})
+                      ({r.calcDistanceKm} km {r.calcKmManual ? "saisis à la main" : r.calcIsRoadDistance ? "réels (route)" : "à vol d'oiseau"})
                     </span>
                   )}
                   {patientOf(r).patient && <span style={styles.metaItem}>Patient : {patientOf(r).patient}</span>}
@@ -4178,7 +4247,7 @@ export default function App() {
                 {r.calcDistanceKm != null && (
                   <div style={styles.modalRow}>
                     <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                      Distance {r.calcIsRoadDistance ? "routière réelle" : "estimée (à vol d'oiseau)"} : {r.calcDistanceKm} km
+                      Distance {r.calcKmManual ? "saisie à la main" : r.calcIsRoadDistance ? "routière réelle" : "estimée (à vol d'oiseau)"} : {r.calcDistanceKm} km
                     </span>
                   </div>
                 )}

@@ -82,6 +82,8 @@ export const emptyForm = {
   grandeVille: false,
   retourAVide: false,
   calcDistanceKm: null,
+  kmManuel: "", // km saisis à la main quand la distance routière n'a pas pu être calculée
+  calcKmManual: false,
   majorationNuitWeekend: false,
   // Course payante (tarif préfectoral) : nuit/dimanche/férié, attente, suppléments, forfait.
   payantNuit: false,
