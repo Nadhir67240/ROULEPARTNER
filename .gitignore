@@ -8,3 +8,5 @@ dist
 
 # Journaux des émulateurs Firebase
 *-debug.log
+
+.claude/settings.local.json
